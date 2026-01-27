@@ -6,7 +6,7 @@ import Register from './components/Register';
 import './App.css';
 
 // Hardcoded admin email
-const ADMIN_EMAIL = 'test2@test.com';
+const ADMIN_EMAIL = 'tyler@fullscopeestimating.com';
 
 function TimeClock() {
   const { user, logout } = useAuth();
@@ -362,6 +362,13 @@ function TimeClock() {
       } else {
         setCompletedBlocks(result.blocks);
         setBlocksBeforeEdit(null);
+
+        // If the edited block is the last block and there's a current block,
+        // update the current block's start time to match the edited block's end time
+        const lastBlock = result.blocks[result.blocks.length - 1];
+        if (currentBlock && lastBlock && lastBlock.id === savedBlock.id && savedBlock.endTime) {
+          setCurrentBlock(prev => ({ ...prev, startTime: savedBlock.endTime }));
+        }
       }
 
       setEditingBlock(null);
