@@ -9,7 +9,9 @@ function TimeClock() {
   const { user, logout } = useAuth();
   const [completedBlocks, setCompletedBlocks] = useState([]);
   const [currentBlock, setCurrentBlock] = useState(null);
+  const [currentTasks, setCurrentTasks] = useState(['']); // Array of task inputs for current block
   const [editingBlock, setEditingBlock] = useState(null); // For "going back in time"
+  const [editingTasks, setEditingTasks] = useState(['']); // Array of task inputs for editing block
   const [swipingBlockId, setSwipingBlockId] = useState(null);
   const [testBlocks, setTestBlocks] = useState(5);
   const [testBreaks, setTestBreaks] = useState(2);
@@ -28,6 +30,7 @@ function TimeClock() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null); // { shift, message }
+  const [expandedShifts, setExpandedShifts] = useState(new Set()); // Track expanded shift IDs
 
   useEffect(() => {
     const loadShifts = async () => {
@@ -92,17 +95,29 @@ function TimeClock() {
       tasks: ''
     };
     setCurrentBlock(newBlock);
+    setCurrentTasks(['']);
+  };
+
+  // Join tasks array into a string, filtering empty entries
+  const joinTasks = (tasksArray) => {
+    return tasksArray.filter(t => t.trim()).join(' • ');
   };
 
   const handleAdvanceBlock = () => {
     if (!currentBlock || !currentBlock.endTime) return;
+
+    // Join tasks before completing
+    const completedBlock = {
+      ...currentBlock,
+      tasks: joinTasks(currentTasks)
+    };
 
     // Trigger swipe animation
     setSwipingBlockId(currentBlock.id);
 
     setTimeout(() => {
       // Move current block to completed
-      setCompletedBlocks([...completedBlocks, currentBlock]);
+      setCompletedBlocks([...completedBlocks, completedBlock]);
 
       // Create new current block with previous end time as start
       const newBlock = {
@@ -112,6 +127,7 @@ function TimeClock() {
         tasks: ''
       };
       setCurrentBlock(newBlock);
+      setCurrentTasks(['']);
       setSwipingBlockId(null);
       setEditingBlock(null);
     }, 400);
@@ -120,19 +136,32 @@ function TimeClock() {
   const handleBreak = () => {
     if (!currentBlock) return;
 
-    const startTime = getCurrentTime();
-    const endTime = addMinutesToTime(startTime, 15);
+    // Break starts where current block ends (or use current block's end time if set)
+    // Do NOT use getCurrentTime() here - breaks should continue from last block
+    let breakStartTime;
+    if (currentBlock.endTime) {
+      breakStartTime = currentBlock.endTime;
+    } else if (completedBlocks.length > 0) {
+      // Use end time of last completed block
+      breakStartTime = completedBlocks[completedBlocks.length - 1].endTime;
+    } else {
+      // Fallback: use current block's start time
+      breakStartTime = currentBlock.startTime;
+    }
+
+    const breakEndTime = addMinutesToTime(breakStartTime, 15);
 
     // Complete current block first if it has content
-    if (currentBlock.startTime && currentBlock.tasks) {
-      setCompletedBlocks([...completedBlocks, { ...currentBlock, endTime: startTime }]);
+    const joinedTasks = joinTasks(currentTasks);
+    if (currentBlock.startTime && joinedTasks) {
+      setCompletedBlocks([...completedBlocks, { ...currentBlock, tasks: joinedTasks, endTime: breakStartTime }]);
     }
 
     // Create break block and immediately complete it
     const breakBlock = {
       id: Date.now(),
-      startTime,
-      endTime,
+      startTime: breakStartTime,
+      endTime: breakEndTime,
       tasks: '15 min Break',
       isBreak: true
     };
@@ -145,11 +174,12 @@ function TimeClock() {
       // Create new current block starting after break
       const newBlock = {
         id: Date.now() + 1,
-        startTime: endTime,
+        startTime: breakEndTime,
         endTime: '',
         tasks: ''
       };
       setCurrentBlock(newBlock);
+      setCurrentTasks(['']);
       setSwipingBlockId(null);
     }, 400);
   };
@@ -165,6 +195,9 @@ function TimeClock() {
   const handleEditBlock = (block) => {
     // Save current block state and edit the selected block
     setEditingBlock(block);
+    // Split existing tasks string into array for editing
+    const tasksArray = block.tasks ? block.tasks.split(' • ') : [''];
+    setEditingTasks(tasksArray.length > 0 ? tasksArray : ['']);
     // Remove from completed blocks
     setCompletedBlocks(completedBlocks.filter(b => b.id !== block.id));
   };
@@ -172,16 +205,23 @@ function TimeClock() {
   const handleSaveEdit = () => {
     if (!editingBlock) return;
 
+    // Join tasks before saving
+    const savedBlock = {
+      ...editingBlock,
+      tasks: joinTasks(editingTasks)
+    };
+
     // Swipe the edited block back to completed
     setSwipingBlockId(editingBlock.id);
 
     setTimeout(() => {
       // Add back to completed blocks in correct position (sorted by start time)
-      const updatedBlocks = [...completedBlocks, editingBlock].sort((a, b) => {
+      const updatedBlocks = [...completedBlocks, savedBlock].sort((a, b) => {
         return a.startTime.localeCompare(b.startTime);
       });
       setCompletedBlocks(updatedBlocks);
       setEditingBlock(null);
+      setEditingTasks(['']);
       setSwipingBlockId(null);
     }, 400);
   };
@@ -195,6 +235,7 @@ function TimeClock() {
       setCompletedBlocks(updatedBlocks);
     }
     setEditingBlock(null);
+    setEditingTasks(['']);
   };
 
   const removeCompletedBlock = (id) => {
@@ -267,14 +308,19 @@ function TimeClock() {
         ...lastBlock,
         endTime: '', // Make it editable
       });
+      // Set the tasks array from the last block
+      setCurrentTasks(lastBlock.tasks ? [lastBlock.tasks] : ['']);
     }
     setEditingBlock(null);
+    setEditingTasks(['']);
   };
 
   const clearAll = () => {
     setCompletedBlocks([]);
     setCurrentBlock(null);
+    setCurrentTasks(['']);
     setEditingBlock(null);
+    setEditingTasks(['']);
     setLastNowTime(null);
   };
 
@@ -289,8 +335,10 @@ function TimeClock() {
 
   const saveShift = async () => {
     const allBlocks = [...completedBlocks];
-    if (currentBlock && currentBlock.startTime && currentBlock.tasks) {
-      allBlocks.push(currentBlock);
+    // Include current block with joined tasks if it has content
+    const currentJoinedTasks = joinTasks(currentTasks);
+    if (currentBlock && currentBlock.startTime && currentJoinedTasks) {
+      allBlocks.push({ ...currentBlock, tasks: currentJoinedTasks });
     }
 
     const validBlocks = allBlocks.filter(block => block.startTime && block.tasks);
@@ -335,8 +383,38 @@ function TimeClock() {
 
   const formatTime = (time) => {
     if (!time) return '--:--';
-    const [hours, minutes] = time.split(':');
+
+    let timeStr = time;
+
+    // Handle Date objects
+    if (time instanceof Date) {
+      const h = time.getHours();
+      const m = time.getMinutes();
+      timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    }
+
+    // Handle object with hours/minutes (some DB drivers return this)
+    if (typeof time === 'object' && time !== null && !Array.isArray(time)) {
+      if ('hours' in time || 'minutes' in time) {
+        const h = time.hours || 0;
+        const m = time.minutes || 0;
+        timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      }
+    }
+
+    // Ensure it's a string
+    if (typeof timeStr !== 'string') {
+      console.log('Unexpected time format:', time, typeof time);
+      return '--:--';
+    }
+
+    // Handle both "HH:MM" and "HH:MM:SS" formats
+    const parts = timeStr.split(':');
+    if (parts.length < 2) return '--:--';
+    const hours = parts[0];
+    const minutes = parts[1];
     const hour = parseInt(hours);
+    if (isNaN(hour)) return '--:--';
     const ampm = hour >= 12 ? 'PM' : 'AM';
     const formattedHour = hour % 12 || 12;
     return `${formattedHour}:${minutes} ${ampm}`;
@@ -345,7 +423,20 @@ function TimeClock() {
   const formatDate = (dateStr) => {
     if (!dateStr) return 'Invalid Date';
     try {
-      const date = new Date(dateStr + 'T00:00:00');
+      let date;
+      // Handle Date objects, ISO strings, and YYYY-MM-DD strings
+      if (dateStr instanceof Date) {
+        date = dateStr;
+      } else if (typeof dateStr === 'string') {
+        // If it's just YYYY-MM-DD, add time to avoid timezone issues
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+          date = new Date(dateStr + 'T12:00:00');
+        } else {
+          date = new Date(dateStr);
+        }
+      } else {
+        return 'Invalid Date';
+      }
       if (isNaN(date.getTime())) return 'Invalid Date';
       return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
     } catch {
@@ -354,6 +445,18 @@ function TimeClock() {
   };
 
   const blockCount = completedBlocks.length + (currentBlock ? 1 : 0);
+
+  const toggleShiftExpanded = (shiftId) => {
+    setExpandedShifts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(shiftId)) {
+        newSet.delete(shiftId);
+      } else {
+        newSet.add(shiftId);
+      }
+      return newSet;
+    });
+  };
 
   return (
     <div className="app">
@@ -425,7 +528,15 @@ function TimeClock() {
                   onClick={() => {
                     if (currentBlock) {
                       const randomTask = clientTasks[Math.floor(Math.random() * clientTasks.length)];
-                      updateCurrentBlock('tasks', randomTask);
+                      // Add to first empty slot or append
+                      const emptyIndex = currentTasks.findIndex(t => !t.trim());
+                      if (emptyIndex >= 0) {
+                        const newTasks = [...currentTasks];
+                        newTasks[emptyIndex] = randomTask;
+                        setCurrentTasks(newTasks);
+                      } else {
+                        setCurrentTasks([...currentTasks, randomTask]);
+                      }
                     }
                   }}
                   disabled={!currentBlock}
@@ -526,12 +637,39 @@ function TimeClock() {
                   </div>
                   <div className="task-field">
                     <label>Tasks</label>
-                    <input
-                      type="text"
-                      value={editingBlock.tasks}
-                      onChange={(e) => updateEditingBlock('tasks', e.target.value)}
-                      placeholder="What did you work on?"
-                    />
+                    {editingTasks.map((task, index) => (
+                      <div key={index} className="task-input-row">
+                        <input
+                          type="text"
+                          value={task}
+                          onChange={(e) => {
+                            const newTasks = [...editingTasks];
+                            newTasks[index] = e.target.value;
+                            setEditingTasks(newTasks);
+                          }}
+                          placeholder={index === 0 ? "What did you work on?" : "Another task..."}
+                        />
+                        {editingTasks.length > 1 && (
+                          <button
+                            type="button"
+                            className="btn-remove-task"
+                            onClick={() => {
+                              const newTasks = editingTasks.filter((_, i) => i !== index);
+                              setEditingTasks(newTasks);
+                            }}
+                          >
+                            −
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className="btn-add-task"
+                      onClick={() => setEditingTasks([...editingTasks, ''])}
+                    >
+                      + Add Task
+                    </button>
                   </div>
                 </div>
               )}
@@ -585,12 +723,39 @@ function TimeClock() {
                   </div>
                   <div className="task-field">
                     <label>Tasks</label>
-                    <input
-                      type="text"
-                      value={currentBlock.tasks}
-                      onChange={(e) => updateCurrentBlock('tasks', e.target.value)}
-                      placeholder="What did you work on?"
-                    />
+                    {currentTasks.map((task, index) => (
+                      <div key={index} className="task-input-row">
+                        <input
+                          type="text"
+                          value={task}
+                          onChange={(e) => {
+                            const newTasks = [...currentTasks];
+                            newTasks[index] = e.target.value;
+                            setCurrentTasks(newTasks);
+                          }}
+                          placeholder={index === 0 ? "What did you work on?" : "Another task..."}
+                        />
+                        {currentTasks.length > 1 && (
+                          <button
+                            type="button"
+                            className="btn-remove-task"
+                            onClick={() => {
+                              const newTasks = currentTasks.filter((_, i) => i !== index);
+                              setCurrentTasks(newTasks);
+                            }}
+                          >
+                            −
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className="btn-add-task"
+                      onClick={() => setCurrentTasks([...currentTasks, ''])}
+                    >
+                      + Add Task
+                    </button>
                   </div>
                   <div className="block-actions">
                     {!currentBlock.isBreak && (
@@ -602,7 +767,7 @@ function TimeClock() {
                       type="button"
                       className="btn-advance"
                       onClick={handleAdvanceBlock}
-                      disabled={!currentBlock.endTime || !currentBlock.tasks}
+                      disabled={!currentBlock.endTime || !currentTasks.some(t => t.trim())}
                     >
                       Next Block →
                     </button>
@@ -648,34 +813,38 @@ function TimeClock() {
                     key={block.id}
                     className={`completed-block ${block.isBreak ? 'break-block' : ''}`}
                   >
-                    <div className="completed-header">
+                    <div className="completed-block-header">
                       <span className="completed-number">
-                        {block.isBreak ? 'Break' : `Block ${index + 1}`}
+                        {block.isBreak ? 'Break' : `Block #${index + 1}`}
                       </span>
                       <span className="completed-hours">
                         {calculateBlockHours(block.startTime, block.endTime)} hrs
                       </span>
                     </div>
-                    <div className="completed-times">
-                      {formatTime(block.startTime)} - {formatTime(block.endTime)}
+                    <div className="completed-task">
+                      {block.tasks.split(' • ').map((task, i) => (
+                        <div key={i} className="task-line">{task}</div>
+                      ))}
                     </div>
-                    <div className="completed-task">{block.tasks}</div>
-                    <div className="completed-actions">
-                      <button
-                        type="button"
-                        className="btn-edit"
-                        onClick={() => handleEditBlock(block)}
-                        disabled={editingBlock !== null}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-delete"
-                        onClick={() => removeCompletedBlock(block.id)}
-                      >
-                        ×
-                      </button>
+                    <div className="completed-meta">
+                      <span>{formatTime(block.startTime)} - {formatTime(block.endTime)}</span>
+                      <div className="completed-actions">
+                        <button
+                          type="button"
+                          className="btn-edit"
+                          onClick={() => handleEditBlock(block)}
+                          disabled={editingBlock !== null}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-delete"
+                          onClick={() => removeCompletedBlock(block.id)}
+                        >
+                          ×
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -694,30 +863,62 @@ function TimeClock() {
               <p className="empty-text">No shifts recorded yet</p>
             ) : (
               <div className="history-list">
-                {shifts.map((shift) => (
-                  <div key={shift._id || shift.id} className="history-item">
-                    <div className="history-header">
-                      <span className="history-date">{formatDate(shift.date)}</span>
-                      <span className="history-hours">{shift.totalHours} hrs</span>
-                    </div>
-                    <div className="history-times">
-                      {formatTime(shift.clockInTime)} - {formatTime(shift.clockOutTime)}
-                    </div>
-                    {shift.timeBlocks && shift.timeBlocks.length > 0 && (
-                      <div className="history-tasks">
-                        {shift.timeBlocks.filter(b => !b.isBreak).map((block, i) => (
-                          <div key={i} className="history-task">
-                            <span className="task-time">{formatTime(block.startTime)}</span>
-                            <span className="task-text">{block.tasks}</span>
-                            {calculateBlockHours(block.startTime, block.endTime) && (
-                              <span className="task-hours">{calculateBlockHours(block.startTime, block.endTime)}h</span>
-                            )}
-                          </div>
-                        ))}
+                {shifts.map((shift) => {
+                  const shiftId = shift._id || shift.id;
+                  const isExpanded = expandedShifts.has(shiftId);
+                  return (
+                    <div key={shiftId} className={`history-item ${isExpanded ? 'expanded' : ''}`}>
+                      <div className="history-header">
+                        <div
+                          className="history-header-left"
+                          onClick={() => toggleShiftExpanded(shiftId)}
+                        >
+                          <span className="expand-icon">{isExpanded ? '▼' : '▶'}</span>
+                          <span className="history-date">{formatDate(shift.date)}</span>
+                          <span className="history-times-inline">
+                            {formatTime(shift.clockInTime)} - {formatTime(shift.clockOutTime)}
+                          </span>
+                        </div>
+                        <div className="history-header-right">
+                          <span className="history-hours">{shift.totalHours} hrs</span>
+                          <button
+                            type="button"
+                            className="btn-delete-shift"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (window.confirm('Delete this shift?')) {
+                                shiftsAPI.delete(shiftId).then(() => {
+                                  setShifts(shifts.filter(s => (s._id || s.id) !== shiftId));
+                                }).catch(err => alert('Failed to delete: ' + err.message));
+                              }
+                            }}
+                          >
+                            ×
+                          </button>
+                        </div>
                       </div>
-                    )}
-                  </div>
-                ))}
+                      {isExpanded && shift.timeBlocks && shift.timeBlocks.length > 0 && (
+                        <div className="history-tasks">
+                          {shift.timeBlocks.map((block, i) => (
+                            <div key={i} className={`history-task ${block.isBreak ? 'break-task' : ''}`}>
+                              <span className="task-time">
+                                {formatTime(block.startTime)} - {formatTime(block.endTime)}
+                              </span>
+                              <span className="task-text">
+                                {block.tasks.split(' • ').map((task, j) => (
+                                  <span key={j} className="task-line-inline">{task}</span>
+                                ))}
+                              </span>
+                              {calculateBlockHours(block.startTime, block.endTime) && (
+                                <span className="task-hours">{calculateBlockHours(block.startTime, block.endTime)}h</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </section>
