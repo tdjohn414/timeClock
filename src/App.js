@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { shiftsAPI } from './services/api';
+import { shiftsAPI, authAPI } from './services/api';
 import Login from './components/Login';
 import Register from './components/Register';
 import './App.css';
@@ -43,6 +43,13 @@ function TimeClock() {
   const [gapData, setGapData] = useState(null); // { startTime, endTime, pendingBlocks, gapIndex }
   const [gapTasks, setGapTasks] = useState(['']);
   const [blocksBeforeEdit, setBlocksBeforeEdit] = useState(null); // For restoring on gap cancel
+  const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const dropdownRef = useRef(null);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordData, setPasswordData] = useState({ current: '', new: '', confirm: '' });
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSuccess, setPasswordSuccess] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
 
   useEffect(() => {
     const loadShifts = async () => {
@@ -75,6 +82,23 @@ function TimeClock() {
       loadAdminShifts();
     }
   }, [activeTab, isAdmin, adminShifts.length]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setShowUserDropdown(false);
+      }
+    };
+
+    if (showUserDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showUserDropdown]);
 
   // Get actual current time (no offset)
   const getActualTime = () => {
@@ -455,6 +479,47 @@ function TimeClock() {
     setCompletedBlocks(completedBlocks.filter(b => b.id !== id));
   };
 
+  const handleChangePassword = async () => {
+    setPasswordError('');
+
+    if (!passwordData.current || !passwordData.new || !passwordData.confirm) {
+      setPasswordError('All fields are required');
+      return;
+    }
+
+    if (passwordData.new !== passwordData.confirm) {
+      setPasswordError('New passwords do not match');
+      return;
+    }
+
+    if (passwordData.new.length < 6) {
+      setPasswordError('New password must be at least 6 characters');
+      return;
+    }
+
+    setChangingPassword(true);
+    try {
+      await authAPI.changePassword(passwordData.current, passwordData.new);
+      setPasswordSuccess(true);
+      setPasswordData({ current: '', new: '', confirm: '' });
+      setTimeout(() => {
+        setShowPasswordModal(false);
+        setPasswordSuccess(false);
+      }, 2000);
+    } catch (err) {
+      setPasswordError(err.message || 'Failed to change password');
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
+  const closePasswordModal = () => {
+    setShowPasswordModal(false);
+    setPasswordData({ current: '', new: '', confirm: '' });
+    setPasswordError('');
+    setPasswordSuccess(false);
+  };
+
   const clientTasks = [
     'Fixed responsive layout issues on mobile',
     'Implemented form validation for user inputs',
@@ -548,16 +613,17 @@ function TimeClock() {
   // Preview shift before saving - shows confirmation modal
   const previewShift = () => {
     const allBlocks = [...completedBlocks];
-    // Include current block with joined tasks if it has content
+    // Include current block only if fully filled out (start time, end time, AND tasks)
+    // This ignores placeholder blocks that only have a start time from "Next Block"
     const currentJoinedTasks = joinTasks(currentTasks);
-    if (currentBlock && currentBlock.startTime && currentJoinedTasks) {
+    if (currentBlock && currentBlock.startTime && currentBlock.endTime && currentJoinedTasks) {
       allBlocks.push({ ...currentBlock, tasks: currentJoinedTasks });
     }
 
-    const validBlocks = allBlocks.filter(block => block.startTime && block.tasks);
+    const validBlocks = allBlocks.filter(block => block.startTime && block.endTime && block.tasks);
 
     if (validBlocks.length === 0) {
-      alert('Please add at least one time block with a start time and tasks');
+      alert('Please add at least one complete time block (start time, end time, and tasks)');
       return;
     }
 
@@ -861,6 +927,72 @@ function TimeClock() {
         </div>
       )}
 
+      {/* Password Reset Modal */}
+      {showPasswordModal && (
+        <div className="modal-overlay" onClick={closePasswordModal}>
+          <div className="preview-modal password-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Change Password</h2>
+              <button className="modal-close" onClick={closePasswordModal}>&times;</button>
+            </div>
+            <div className="modal-body">
+              {passwordSuccess ? (
+                <div className="password-success">
+                  Password changed successfully!
+                </div>
+              ) : (
+                <>
+                  {passwordError && (
+                    <div className="password-error">{passwordError}</div>
+                  )}
+                  <div className="password-field">
+                    <label>Current Password</label>
+                    <input
+                      type="password"
+                      value={passwordData.current}
+                      onChange={(e) => setPasswordData({ ...passwordData, current: e.target.value })}
+                      placeholder="Enter current password"
+                    />
+                  </div>
+                  <div className="password-field">
+                    <label>New Password</label>
+                    <input
+                      type="password"
+                      value={passwordData.new}
+                      onChange={(e) => setPasswordData({ ...passwordData, new: e.target.value })}
+                      placeholder="Enter new password"
+                    />
+                  </div>
+                  <div className="password-field">
+                    <label>Confirm New Password</label>
+                    <input
+                      type="password"
+                      value={passwordData.confirm}
+                      onChange={(e) => setPasswordData({ ...passwordData, confirm: e.target.value })}
+                      placeholder="Confirm new password"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+            {!passwordSuccess && (
+              <div className="modal-footer">
+                <button className="btn-cancel-modal" onClick={closePasswordModal}>
+                  Cancel
+                </button>
+                <button
+                  className="btn-confirm-modal"
+                  onClick={handleChangePassword}
+                  disabled={changingPassword}
+                >
+                  {changingPassword ? 'Changing...' : 'Change Password'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <header className="header">
         <div className="header-top">
           <h1>Time Clock</h1>
@@ -922,8 +1054,31 @@ function TimeClock() {
               </div>
             </div>
             <div className="user-info">
-              <span>{user.name}</span>
-              <button className="btn-logout" onClick={logout}>Logout</button>
+              <div className="user-dropdown-container" ref={dropdownRef}>
+                <button
+                  className="user-name-btn"
+                  onClick={() => setShowUserDropdown(!showUserDropdown)}
+                >
+                  {user.name}
+                  <span className="dropdown-arrow">{showUserDropdown ? '▲' : '▼'}</span>
+                </button>
+                {showUserDropdown && (
+                  <div className="user-dropdown">
+                    <button
+                      className="dropdown-item"
+                      onClick={() => {
+                        setShowPasswordModal(true);
+                        setShowUserDropdown(false);
+                      }}
+                    >
+                      Reset Password
+                    </button>
+                    <button className="dropdown-item logout-item" onClick={logout}>
+                      Logout
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

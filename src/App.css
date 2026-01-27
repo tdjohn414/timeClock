@@ -1361,6 +1361,127 @@
   color: white;
 }
 
+/* User Dropdown */
+.user-dropdown-container {
+  position: relative;
+}
+
+.user-name-btn {
+  background: transparent;
+  border: none;
+  color: #2c3e50;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.user-name-btn:hover {
+  background: #f0f0f0;
+}
+
+.dropdown-arrow {
+  font-size: 0.7rem;
+  color: #7f8c8d;
+}
+
+.user-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  min-width: 160px;
+  z-index: 100;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-size: 0.9rem;
+  color: #2c3e50;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dropdown-item:hover {
+  background: #f8f9fa;
+}
+
+.dropdown-item.logout-item {
+  color: #e74c3c;
+  border-top: 1px solid #eee;
+}
+
+.dropdown-item.logout-item:hover {
+  background: #fdf2f2;
+}
+
+/* Password Modal */
+.password-modal {
+  max-width: 400px;
+}
+
+.password-field {
+  margin-bottom: 16px;
+}
+
+.password-field label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #7f8c8d;
+  margin-bottom: 6px;
+}
+
+.password-field input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+}
+
+.password-field input:focus {
+  outline: none;
+  border-color: #3498db;
+}
+
+.password-error {
+  background: #fdf2f2;
+  border: 1px solid #e74c3c;
+  color: #c0392b;
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 0.9rem;
+}
+
+.password-success {
+  background: #e8f8f0;
+  border: 1px solid #27ae60;
+  color: #1e8449;
+  padding: 20px;
+  border-radius: 8px;
+  text-align: center;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .main-grid {

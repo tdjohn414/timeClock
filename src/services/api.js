@@ -41,6 +41,12 @@ export const authAPI = {
     }),
 
   getMe: () => request('/auth/me'),
+
+  changePassword: (currentPassword, newPassword) =>
+    request('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
 };
 
 // Transform snake_case DB fields to camelCase for frontend
