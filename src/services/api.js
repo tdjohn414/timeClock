@@ -99,11 +99,13 @@ export const shiftsAPI = {
     return transformShift(shift);
   },
 
-  create: (shiftData) =>
-    request('/shifts', {
+  create: async (shiftData) => {
+    const shift = await request('/shifts', {
       method: 'POST',
       body: JSON.stringify(shiftData),
-    }),
+    });
+    return transformShift(shift);
+  },
 
   update: (id, shiftData) =>
     request(`/shifts/${id}`, {

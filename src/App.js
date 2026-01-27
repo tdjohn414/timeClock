@@ -20,7 +20,6 @@ function TimeClock() {
   const [testBreaks, setTestBreaks] = useState(2);
   const [nowOffsetHours, setNowOffsetHours] = useState(0);
   const [nowOffsetMins, setNowOffsetMins] = useState(0);
-  const [lastNowTime, setLastNowTime] = useState(null); // Track virtual "now" for testing
   const [activeTab, setActiveTab] = useState('today'); // 'today', 'history', or 'admin'
   const [adminShifts, setAdminShifts] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
@@ -37,6 +36,8 @@ function TimeClock() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null); // { shift, message }
   const [expandedShifts, setExpandedShifts] = useState(new Set()); // Track expanded shift IDs
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [previewShiftData, setPreviewShiftData] = useState(null);
 
   useEffect(() => {
     const loadShifts = async () => {
@@ -70,29 +71,49 @@ function TimeClock() {
     }
   }, [activeTab, isAdmin, adminShifts.length]);
 
-  const getCurrentTime = () => {
-    let baseTime;
+  // Get actual current time (no offset)
+  const getActualTime = () => {
+    const now = new Date();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    return `${hours}:${minutes}`;
+  };
 
-    if (lastNowTime && (nowOffsetHours > 0 || nowOffsetMins > 0)) {
-      // Use last "Now" time as base when offset is set
-      const [h, m] = lastNowTime.split(':').map(Number);
-      baseTime = new Date(2000, 0, 1, h, m);
-    } else {
-      // Use actual current time
-      baseTime = new Date();
+  // Get start time for "Now" - uses previous block's end time if available
+  const getStartTime = () => {
+    // If there are completed blocks, continue from last one's end time
+    if (completedBlocks.length > 0) {
+      const lastBlock = completedBlocks[completedBlocks.length - 1];
+      if (lastBlock.endTime) {
+        return lastBlock.endTime;
+      }
     }
+    // Otherwise use actual current time
+    return getActualTime();
+  };
 
+  // Get end time = start time + offset (for "Now" on end time field)
+  const getEndTimeWithOffset = (startTime) => {
+    if (!startTime) return getActualTime();
+
+    const [h, m] = startTime.split(':').map(Number);
+    const baseTime = new Date(2000, 0, 1, h, m);
+
+    // Add offset to get end time
     baseTime.setHours(baseTime.getHours() + nowOffsetHours);
     baseTime.setMinutes(baseTime.getMinutes() + nowOffsetMins);
 
     const hours = String(baseTime.getHours()).padStart(2, '0');
     const minutes = String(baseTime.getMinutes()).padStart(2, '0');
-    const result = `${hours}:${minutes}`;
+    return `${hours}:${minutes}`;
+  };
 
-    // Update lastNowTime for next click
-    setLastNowTime(result);
-
-    return result;
+  // Increment end time - if no end time, use start time as base
+  const incrementEndTime = (block, updateFn, minutes) => {
+    const baseTime = block.endTime || block.startTime;
+    if (!baseTime) return;
+    const newTime = addMinutesToTime(baseTime, minutes);
+    updateFn('endTime', newTime);
   };
 
   const addMinutesToTime = (time, minutesToAdd) => {
@@ -104,8 +125,25 @@ function TimeClock() {
 
   const calculateBlockHours = (startTime, endTime) => {
     if (!startTime || !endTime) return null;
-    const startDate = new Date(`2000-01-01T${startTime}`);
-    const endDate = new Date(`2000-01-01T${endTime}`);
+
+    // Normalize time strings (handle HH:MM:SS and HH:MM formats)
+    const normalizeTime = (t) => {
+      if (typeof t !== 'string') return t;
+      // Take only HH:MM part
+      return t.split(':').slice(0, 2).join(':');
+    };
+
+    const start = normalizeTime(startTime);
+    const end = normalizeTime(endTime);
+
+    const startDate = new Date(`2000-01-01T${start}:00`);
+    let endDate = new Date(`2000-01-01T${end}:00`);
+
+    // Handle midnight crossing (e.g., 22:00 to 00:00)
+    if (endDate <= startDate) {
+      endDate = new Date(`2000-01-02T${end}:00`);
+    }
+
     const diffMs = endDate - startDate;
     const diffHours = diffMs / (1000 * 60 * 60);
     return diffHours > 0 ? diffHours.toFixed(2) : '0.00';
@@ -114,7 +152,7 @@ function TimeClock() {
   const handleClockIn = () => {
     const newBlock = {
       id: Date.now(),
-      startTime: getCurrentTime(),
+      startTime: getStartTime(),
       endTime: '',
       tasks: ''
     };
@@ -161,7 +199,7 @@ function TimeClock() {
     if (!currentBlock) return;
 
     // Break starts where current block ends (or use current block's end time if set)
-    // Do NOT use getCurrentTime() here - breaks should continue from last block
+    // Do NOT use getActualTime() here - breaks should continue from last block
     let breakStartTime;
     if (currentBlock.endTime) {
       breakStartTime = currentBlock.endTime;
@@ -345,7 +383,6 @@ function TimeClock() {
     setCurrentTasks(['']);
     setEditingBlock(null);
     setEditingTasks(['']);
-    setLastNowTime(null);
   };
 
   const calculateTotalHours = () => {
@@ -357,7 +394,8 @@ function TimeClock() {
     return total.toFixed(2);
   };
 
-  const saveShift = async () => {
+  // Preview shift before saving - shows confirmation modal
+  const previewShift = () => {
     const allBlocks = [...completedBlocks];
     // Include current block with joined tasks if it has content
     const currentJoinedTasks = joinTasks(currentTasks);
@@ -385,24 +423,39 @@ function TimeClock() {
       timeBlocks: sortedBlocks
     };
 
+    setPreviewShiftData(shiftData);
+    setShowPreviewModal(true);
+  };
+
+  // Actually save the shift after confirmation
+  const confirmSave = async () => {
+    if (!previewShiftData) return;
+
     setSaving(true);
     try {
-      const newShift = await shiftsAPI.create(shiftData);
+      const newShift = await shiftsAPI.create(previewShiftData);
       setShifts([newShift, ...shifts]);
 
       // Show toast with preview
       setToast({
         message: 'Shift saved successfully!',
-        shift: shiftData
+        shift: previewShiftData
       });
       setTimeout(() => setToast(null), 5000);
 
+      setShowPreviewModal(false);
+      setPreviewShiftData(null);
       clearAll();
     } catch (err) {
       alert('Failed to save shift: ' + err.message);
     } finally {
       setSaving(false);
     }
+  };
+
+  const cancelPreview = () => {
+    setShowPreviewModal(false);
+    setPreviewShiftData(null);
   };
 
   const formatTime = (time) => {
@@ -509,6 +562,62 @@ function TimeClock() {
         </div>
       )}
 
+      {/* Confirmation Modal */}
+      {showPreviewModal && previewShiftData && (
+        <div className="modal-overlay" onClick={cancelPreview}>
+          <div className="preview-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Review Your Shift</h2>
+              <button className="modal-close" onClick={cancelPreview}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <div className="preview-summary">
+                <div className="preview-date">{formatDate(previewShiftData.date)}</div>
+                <div className="preview-times">
+                  <span className="preview-label">Clock In/Out:</span>
+                  <span>{formatTime(previewShiftData.clockInTime)} - {formatTime(previewShiftData.clockOutTime)}</span>
+                </div>
+                <div className="preview-total">
+                  <span className="preview-label">Total Hours:</span>
+                  <strong>{previewShiftData.totalHours} hrs</strong>
+                </div>
+              </div>
+              <div className="preview-blocks">
+                <h3>Time Blocks</h3>
+                {previewShiftData.timeBlocks.map((block, index) => (
+                  <div key={index} className={`preview-block ${block.isBreak ? 'break-block' : ''}`}>
+                    <div className="preview-block-header">
+                      <span className="preview-block-num">
+                        {block.isBreak ? 'Break' : `Block ${index + 1}`}
+                      </span>
+                      <span className="preview-block-time">
+                        {formatTime(block.startTime)} - {formatTime(block.endTime)}
+                      </span>
+                      <span className="preview-block-hours">
+                        {calculateBlockHours(block.startTime, block.endTime)}h
+                      </span>
+                    </div>
+                    <div className="preview-block-tasks">
+                      {block.tasks.split(' • ').map((task, i) => (
+                        <div key={i} className="preview-task-item">{task}</div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-cancel-modal" onClick={cancelPreview}>
+                Go Back & Edit
+              </button>
+              <button className="btn-confirm-modal" onClick={confirmSave} disabled={saving}>
+                {saving ? 'Saving...' : 'Confirm & Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="header">
         <div className="header-top">
           <h1>Time Clock</h1>
@@ -535,7 +644,7 @@ function TimeClock() {
                 )}
               </div>
               <div className="test-row">
-                <span className="now-offset-label">Now +</span>
+                <span className="now-offset-label">Block +</span>
                 <select value={nowOffsetHours} onChange={(e) => setNowOffsetHours(Number(e.target.value))}>
                   {[0, 1, 2, 3, 4, 5].map(n => (
                     <option key={n} value={n}>{n}h</option>
@@ -640,13 +749,6 @@ function TimeClock() {
                           value={editingBlock.startTime}
                           onChange={(e) => updateEditingBlock('startTime', e.target.value)}
                         />
-                        <button
-                          type="button"
-                          className="btn-now"
-                          onClick={() => updateEditingBlock('startTime', getCurrentTime())}
-                        >
-                          Now
-                        </button>
                       </div>
                     </div>
                     <div className="time-field">
@@ -660,9 +762,9 @@ function TimeClock() {
                         <button
                           type="button"
                           className="btn-now"
-                          onClick={() => updateEditingBlock('endTime', getCurrentTime())}
+                          onClick={() => updateEditingBlock('endTime', getEndTimeWithOffset(editingBlock.startTime))}
                         >
-                          Now
+                          Now{(nowOffsetHours > 0 || nowOffsetMins > 0) ? '+' : ''}
                         </button>
                       </div>
                     </div>
@@ -719,20 +821,15 @@ function TimeClock() {
                   </div>
                   <div className="block-times">
                     <div className="time-field">
-                      <label>Start</label>
+                      <label>Start{completedBlocks.length > 0 }</label>
                       <div className="time-input-group">
                         <input
                           type="time"
                           value={currentBlock.startTime}
-                          onChange={(e) => updateCurrentBlock('startTime', e.target.value)}
+                          onChange={(e) => !completedBlocks.length && updateCurrentBlock('startTime', e.target.value)}
+                          readOnly={completedBlocks.length > 0}
+                          className={completedBlocks.length > 0 ? 'locked-input' : ''}
                         />
-                        <button
-                          type="button"
-                          className="btn-now"
-                          onClick={() => updateCurrentBlock('startTime', getCurrentTime())}
-                        >
-                          Now
-                        </button>
                       </div>
                     </div>
                     <div className="time-field">
@@ -746,9 +843,9 @@ function TimeClock() {
                         <button
                           type="button"
                           className="btn-now"
-                          onClick={() => updateCurrentBlock('endTime', getCurrentTime())}
+                          onClick={() => updateCurrentBlock('endTime', getEndTimeWithOffset(currentBlock.startTime))}
                         >
-                          Now
+                          Now{(nowOffsetHours > 0 || nowOffsetMins > 0) ? '+' : ''}
                         </button>
                       </div>
                     </div>
@@ -823,7 +920,7 @@ function TimeClock() {
               <button
                 type="button"
                 className="btn-save"
-                onClick={saveShift}
+                onClick={previewShift}
                 disabled={completedBlocks.length === 0 && !currentBlock || saving}
               >
                 {saving ? 'Saving...' : 'Save Shift'}
