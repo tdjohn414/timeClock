@@ -27,6 +27,7 @@ function TimeClock() {
   const [shifts, setShifts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState(null); // { shift, message }
 
   useEffect(() => {
     const loadShifts = async () => {
@@ -43,12 +44,28 @@ function TimeClock() {
   }, []);
 
   const getCurrentTime = () => {
-    const now = new Date();
-    now.setHours(now.getHours() + nowOffsetHours);
-    now.setMinutes(now.getMinutes() + nowOffsetMins);
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    return `${hours}:${minutes}`;
+    let baseTime;
+
+    if (lastNowTime && (nowOffsetHours > 0 || nowOffsetMins > 0)) {
+      // Use last "Now" time as base when offset is set
+      const [h, m] = lastNowTime.split(':').map(Number);
+      baseTime = new Date(2000, 0, 1, h, m);
+    } else {
+      // Use actual current time
+      baseTime = new Date();
+    }
+
+    baseTime.setHours(baseTime.getHours() + nowOffsetHours);
+    baseTime.setMinutes(baseTime.getMinutes() + nowOffsetMins);
+
+    const hours = String(baseTime.getHours()).padStart(2, '0');
+    const minutes = String(baseTime.getMinutes()).padStart(2, '0');
+    const result = `${hours}:${minutes}`;
+
+    // Update lastNowTime for next click
+    setLastNowTime(result);
+
+    return result;
   };
 
   const addMinutesToTime = (time, minutesToAdd) => {
@@ -258,6 +275,7 @@ function TimeClock() {
     setCompletedBlocks([]);
     setCurrentBlock(null);
     setEditingBlock(null);
+    setLastNowTime(null);
   };
 
   const calculateTotalHours = () => {
@@ -299,6 +317,14 @@ function TimeClock() {
     try {
       const newShift = await shiftsAPI.create(shiftData);
       setShifts([newShift, ...shifts]);
+
+      // Show toast with preview
+      setToast({
+        message: 'Shift saved successfully!',
+        shift: shiftData
+      });
+      setTimeout(() => setToast(null), 5000);
+
       clearAll();
     } catch (err) {
       alert('Failed to save shift: ' + err.message);
@@ -317,14 +343,45 @@ function TimeClock() {
   };
 
   const formatDate = (dateStr) => {
-    const date = new Date(dateStr + 'T00:00:00');
-    return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    if (!dateStr) return 'Invalid Date';
+    try {
+      const date = new Date(dateStr + 'T00:00:00');
+      if (isNaN(date.getTime())) return 'Invalid Date';
+      return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    } catch {
+      return 'Invalid Date';
+    }
   };
 
   const blockCount = completedBlocks.length + (currentBlock ? 1 : 0);
 
   return (
     <div className="app">
+      {/* Toast Notification */}
+      {toast && (
+        <div className="toast">
+          <div className="toast-header">
+            <span className="toast-message">{toast.message}</span>
+            <button className="toast-close" onClick={() => setToast(null)}>&times;</button>
+          </div>
+          <div className="toast-preview">
+            <div className="toast-date">{formatDate(toast.shift.date)}</div>
+            <div className="toast-times">
+              {formatTime(toast.shift.clockInTime)} - {formatTime(toast.shift.clockOutTime)}
+            </div>
+            <div className="toast-hours">{toast.shift.totalHours} hours</div>
+            <div className="toast-blocks">
+              {toast.shift.timeBlocks.filter(b => !b.isBreak).slice(0, 3).map((b, i) => (
+                <div key={i} className="toast-block-item">{b.tasks}</div>
+              ))}
+              {toast.shift.timeBlocks.filter(b => !b.isBreak).length > 3 && (
+                <div className="toast-more">+{toast.shift.timeBlocks.filter(b => !b.isBreak).length - 3} more</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="header">
         <div className="header-top">
           <h1>Time Clock</h1>
