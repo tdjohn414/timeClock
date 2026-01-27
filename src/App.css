@@ -1310,6 +1310,57 @@
   color: white;
 }
 
+/* Gap Fill Modal */
+.gap-modal .modal-header {
+  background: #fff3cd;
+  border-bottom-color: #ffc107;
+}
+
+.gap-modal .modal-header h2 {
+  color: #856404;
+}
+
+.gap-warning {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  color: #856404;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.gap-times {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.gap-duration {
+  text-align: center;
+  padding: 10px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  color: #2c3e50;
+}
+
+.gap-duration strong {
+  color: #27ae60;
+}
+
+/* Extend Break Button */
+.btn-extend-break {
+  border-color: #f39c12;
+  color: #f39c12;
+}
+
+.btn-extend-break:hover:not(:disabled) {
+  background: #f39c12;
+  color: white;
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .main-grid {

@@ -15,6 +15,7 @@ function TimeClock() {
   const [currentTasks, setCurrentTasks] = useState(['']); // Array of task inputs for current block
   const [editingBlock, setEditingBlock] = useState(null); // For "going back in time"
   const [editingTasks, setEditingTasks] = useState(['']); // Array of task inputs for editing block
+  const [editingOriginalIndex, setEditingOriginalIndex] = useState(null); // Track original position
   const [swipingBlockId, setSwipingBlockId] = useState(null);
   const [testBlocks, setTestBlocks] = useState(5);
   const [testBreaks, setTestBreaks] = useState(2);
@@ -38,6 +39,10 @@ function TimeClock() {
   const [expandedShifts, setExpandedShifts] = useState(new Set()); // Track expanded shift IDs
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewShiftData, setPreviewShiftData] = useState(null);
+  const [showGapModal, setShowGapModal] = useState(false);
+  const [gapData, setGapData] = useState(null); // { startTime, endTime, pendingBlocks, gapIndex }
+  const [gapTasks, setGapTasks] = useState(['']);
+  const [blocksBeforeEdit, setBlocksBeforeEdit] = useState(null); // For restoring on gap cancel
 
   useEffect(() => {
     const loadShifts = async () => {
@@ -255,49 +260,189 @@ function TimeClock() {
   };
 
   const handleEditBlock = (block) => {
+    // Track original position before removing
+    const originalIndex = completedBlocks.findIndex(b => b.id === block.id);
+    setEditingOriginalIndex(originalIndex);
+
     // Save current block state and edit the selected block
     setEditingBlock(block);
-    // Split existing tasks string into array for editing
-    const tasksArray = block.tasks ? block.tasks.split(' • ') : [''];
+    // Split existing tasks string into array for editing (skip for breaks)
+    const tasksArray = block.isBreak ? [''] : (block.tasks ? block.tasks.split(' • ') : ['']);
     setEditingTasks(tasksArray.length > 0 ? tasksArray : ['']);
     // Remove from completed blocks
     setCompletedBlocks(completedBlocks.filter(b => b.id !== block.id));
   };
 
+  // Helper to compare times accounting for overnight shifts
+  const timeToMinutes = (time) => {
+    if (!time) return 0;
+    const [h, m] = time.split(':').map(Number);
+    return h * 60 + m;
+  };
+
+  // Process blocks after edit - handle overlaps and gaps
+  const processBlocksAfterEdit = (blocks, savedBlock, insertIndex) => {
+    let updatedBlocks = [...blocks];
+    updatedBlocks.splice(insertIndex, 0, savedBlock);
+
+    const editedEndMinutes = timeToMinutes(savedBlock.endTime);
+
+    // Check if there's a next block
+    if (insertIndex + 1 < updatedBlocks.length) {
+      const nextBlock = updatedBlocks[insertIndex + 1];
+      const nextStartMinutes = timeToMinutes(nextBlock.startTime);
+      const nextEndMinutes = timeToMinutes(nextBlock.endTime);
+
+      // Handle overlaps
+      if (editedEndMinutes > nextStartMinutes) {
+        // Complete overlap - remove blocks
+        let i = insertIndex + 1;
+        while (i < updatedBlocks.length) {
+          const block = updatedBlocks[i];
+          const blockStartMinutes = timeToMinutes(block.startTime);
+          const blockEndMinutes = timeToMinutes(block.endTime);
+
+          if (editedEndMinutes >= blockEndMinutes) {
+            updatedBlocks.splice(i, 1);
+          } else if (editedEndMinutes > blockStartMinutes) {
+            updatedBlocks[i] = { ...block, startTime: savedBlock.endTime };
+            i++;
+          } else {
+            break;
+          }
+        }
+        return { blocks: updatedBlocks, gap: null };
+      }
+
+      // Handle gap - edited end time is BEFORE next block's start
+      if (editedEndMinutes < nextStartMinutes) {
+        return {
+          blocks: updatedBlocks,
+          gap: {
+            startTime: savedBlock.endTime,
+            endTime: nextBlock.startTime,
+            gapIndex: insertIndex + 1
+          }
+        };
+      }
+    }
+
+    return { blocks: updatedBlocks, gap: null };
+  };
+
   const handleSaveEdit = () => {
     if (!editingBlock) return;
 
-    // Join tasks before saving
+    // Save original blocks in case we need to restore on gap cancel
+    // Include the editing block at its original position
+    const originalBlocks = [...completedBlocks];
+    originalBlocks.splice(editingOriginalIndex, 0, editingBlock);
+    setBlocksBeforeEdit(originalBlocks);
+
+    // Join tasks before saving (keep original for breaks)
     const savedBlock = {
       ...editingBlock,
-      tasks: joinTasks(editingTasks)
+      tasks: editingBlock.isBreak ? editingBlock.tasks : joinTasks(editingTasks)
     };
 
     // Swipe the edited block back to completed
     setSwipingBlockId(editingBlock.id);
 
     setTimeout(() => {
-      // Add back to completed blocks in correct position (sorted by start time)
-      const updatedBlocks = [...completedBlocks, savedBlock].sort((a, b) => {
-        return a.startTime.localeCompare(b.startTime);
-      });
-      setCompletedBlocks(updatedBlocks);
+      const insertIndex = Math.min(editingOriginalIndex, completedBlocks.length);
+      const result = processBlocksAfterEdit(completedBlocks, savedBlock, insertIndex);
+
+      if (result.gap) {
+        // There's a gap - show modal to fill it
+        setGapData({
+          ...result.gap,
+          pendingBlocks: result.blocks
+        });
+        setGapTasks(['']);
+        setShowGapModal(true);
+      } else {
+        setCompletedBlocks(result.blocks);
+        setBlocksBeforeEdit(null);
+      }
+
       setEditingBlock(null);
       setEditingTasks(['']);
+      setEditingOriginalIndex(null);
       setSwipingBlockId(null);
     }, 400);
   };
 
+  // Handle filling a gap
+  const handleFillGap = () => {
+    if (!gapData) return;
+
+    const gapBlock = {
+      id: Date.now(),
+      startTime: gapData.startTime,
+      endTime: gapData.endTime,
+      tasks: joinTasks(gapTasks),
+      isBreak: false
+    };
+
+    // Insert the gap block
+    let updatedBlocks = [...gapData.pendingBlocks];
+    updatedBlocks.splice(gapData.gapIndex, 0, gapBlock);
+
+    // Check if this creates another gap or overlap
+    const gapEndMinutes = timeToMinutes(gapBlock.endTime);
+    const nextIndex = gapData.gapIndex + 1;
+
+    if (nextIndex < updatedBlocks.length) {
+      const nextBlock = updatedBlocks[nextIndex];
+      const nextStartMinutes = timeToMinutes(nextBlock.startTime);
+
+      // Still a gap?
+      if (gapEndMinutes < nextStartMinutes) {
+        setGapData({
+          startTime: gapBlock.endTime,
+          endTime: nextBlock.startTime,
+          pendingBlocks: updatedBlocks,
+          gapIndex: nextIndex
+        });
+        setGapTasks(['']);
+        return; // Keep modal open
+      }
+
+      // Overlap? Adjust next block
+      if (gapEndMinutes > nextStartMinutes) {
+        updatedBlocks[nextIndex] = { ...nextBlock, startTime: gapBlock.endTime };
+      }
+    }
+
+    setCompletedBlocks(updatedBlocks);
+    setShowGapModal(false);
+    setGapData(null);
+    setGapTasks(['']);
+    setBlocksBeforeEdit(null);
+  };
+
+  const handleCancelGap = () => {
+    // Cancel gap fill - restore blocks to state before the edit
+    if (blocksBeforeEdit) {
+      setCompletedBlocks(blocksBeforeEdit);
+    }
+    setShowGapModal(false);
+    setGapData(null);
+    setGapTasks(['']);
+    setBlocksBeforeEdit(null);
+  };
+
   const handleCancelEdit = () => {
-    // Restore the editing block to completed without changes
+    // Restore the editing block to completed at original position
     if (editingBlock) {
-      const updatedBlocks = [...completedBlocks, editingBlock].sort((a, b) => {
-        return a.startTime.localeCompare(b.startTime);
-      });
+      const updatedBlocks = [...completedBlocks];
+      const insertIndex = Math.min(editingOriginalIndex ?? updatedBlocks.length, updatedBlocks.length);
+      updatedBlocks.splice(insertIndex, 0, editingBlock);
       setCompletedBlocks(updatedBlocks);
     }
     setEditingBlock(null);
     setEditingTasks(['']);
+    setEditingOriginalIndex(null);
   };
 
   const removeCompletedBlock = (id) => {
@@ -410,9 +555,9 @@ function TimeClock() {
       return;
     }
 
-    const sortedBlocks = validBlocks.sort((a, b) => a.startTime.localeCompare(b.startTime));
-    const clockInTime = sortedBlocks[0].startTime;
-    const clockOutTime = sortedBlocks[sortedBlocks.length - 1].endTime || sortedBlocks[sortedBlocks.length - 1].startTime;
+    // Don't sort - preserve the order user entered them (handles overnight shifts correctly)
+    const clockInTime = validBlocks[0].startTime;
+    const clockOutTime = validBlocks[validBlocks.length - 1].endTime || validBlocks[validBlocks.length - 1].startTime;
     const totalHours = calculateTotalHours();
 
     const shiftData = {
@@ -420,7 +565,7 @@ function TimeClock() {
       clockInTime,
       clockOutTime,
       totalHours,
-      timeBlocks: sortedBlocks
+      timeBlocks: validBlocks
     };
 
     setPreviewShiftData(shiftData);
@@ -584,11 +729,16 @@ function TimeClock() {
               </div>
               <div className="preview-blocks">
                 <h3>Time Blocks</h3>
-                {previewShiftData.timeBlocks.map((block, index) => (
+                {previewShiftData.timeBlocks.map((block, index) => {
+                  // Count only work blocks for numbering
+                  const workBlockNumber = previewShiftData.timeBlocks
+                    .slice(0, index + 1)
+                    .filter(b => !b.isBreak).length;
+                  return (
                   <div key={index} className={`preview-block ${block.isBreak ? 'break-block' : ''}`}>
                     <div className="preview-block-header">
                       <span className="preview-block-num">
-                        {block.isBreak ? 'Break' : `Block ${index + 1}`}
+                        {block.isBreak ? 'Break' : `Block ${workBlockNumber}`}
                       </span>
                       <span className="preview-block-time">
                         {formatTime(block.startTime)} - {formatTime(block.endTime)}
@@ -603,7 +753,8 @@ function TimeClock() {
                       ))}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
             <div className="modal-footer">
@@ -612,6 +763,92 @@ function TimeClock() {
               </button>
               <button className="btn-confirm-modal" onClick={confirmSave} disabled={saving}>
                 {saving ? 'Saving...' : 'Confirm & Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Gap Fill Modal */}
+      {showGapModal && gapData && (
+        <div className="modal-overlay">
+          <div className="preview-modal gap-modal">
+            <div className="modal-header">
+              <h2>Fill Time Gap</h2>
+            </div>
+            <div className="modal-body">
+              <div className="gap-warning">
+                Your edit created a gap in the timeline. Please fill in what you worked on during this time.
+              </div>
+              <div className="gap-times">
+                <div className="time-field">
+                  <label>Gap Start</label>
+                  <div className="time-input-group">
+                    <input
+                      type="time"
+                      value={gapData.startTime}
+                      onChange={(e) => setGapData({ ...gapData, startTime: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className="time-field">
+                  <label>Gap End</label>
+                  <div className="time-input-group">
+                    <input
+                      type="time"
+                      value={gapData.endTime}
+                      onChange={(e) => setGapData({ ...gapData, endTime: e.target.value })}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="gap-duration">
+                Duration: <strong>{calculateBlockHours(gapData.startTime, gapData.endTime)} hrs</strong>
+              </div>
+              <div className="task-field">
+                <label>What did you work on?</label>
+                {gapTasks.map((task, index) => (
+                  <div key={index} className="task-input-row">
+                    <input
+                      type="text"
+                      value={task}
+                      onChange={(e) => {
+                        const newTasks = [...gapTasks];
+                        newTasks[index] = e.target.value;
+                        setGapTasks(newTasks);
+                      }}
+                      placeholder={index === 0 ? "Enter task..." : "Another task..."}
+                    />
+                    {gapTasks.length > 1 && (
+                      <button
+                        type="button"
+                        className="btn-remove-task"
+                        onClick={() => setGapTasks(gapTasks.filter((_, i) => i !== index))}
+                      >
+                        −
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="btn-add-task"
+                  onClick={() => setGapTasks([...gapTasks, ''])}
+                >
+                  + Add Task
+                </button>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-cancel-modal" onClick={handleCancelGap}>
+                Cancel Edit
+              </button>
+              <button
+                className="btn-confirm-modal"
+                onClick={handleFillGap}
+                disabled={!gapTasks.some(t => t.trim())}
+              >
+                Fill Gap
               </button>
             </div>
           </div>
@@ -767,44 +1004,63 @@ function TimeClock() {
                           Now{(nowOffsetHours > 0 || nowOffsetMins > 0) ? '+' : ''}
                         </button>
                       </div>
+                      <div className="time-increment-btns">
+                        <button
+                          type="button"
+                          className="btn-increment"
+                          onClick={() => incrementEndTime(editingBlock, updateEditingBlock, 15)}
+                        >
+                          +15m
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-increment"
+                          onClick={() => incrementEndTime(editingBlock, updateEditingBlock, 60)}
+                        >
+                          +1hr
+                        </button>
+                      </div>
                     </div>
                   </div>
-                  <div className="task-field">
-                    <label>Tasks</label>
-                    {editingTasks.map((task, index) => (
-                      <div key={index} className="task-input-row">
-                        <input
-                          type="text"
-                          value={task}
-                          onChange={(e) => {
-                            const newTasks = [...editingTasks];
-                            newTasks[index] = e.target.value;
-                            setEditingTasks(newTasks);
-                          }}
-                          placeholder={index === 0 ? "What did you work on?" : "Another task..."}
-                        />
-                        {editingTasks.length > 1 && (
-                          <button
-                            type="button"
-                            className="btn-remove-task"
-                            onClick={() => {
-                              const newTasks = editingTasks.filter((_, i) => i !== index);
+                  {/* Hide task input for breaks */}
+                  {!editingBlock.isBreak && (
+                    <div className="task-field">
+                      <label>Tasks</label>
+                      {editingTasks.map((task, index) => (
+                        <div key={index} className="task-input-row">
+                          <input
+                            type="text"
+                            value={task}
+                            onChange={(e) => {
+                              const newTasks = [...editingTasks];
+                              newTasks[index] = e.target.value;
                               setEditingTasks(newTasks);
                             }}
-                          >
-                            −
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    <button
-                      type="button"
-                      className="btn-add-task"
-                      onClick={() => setEditingTasks([...editingTasks, ''])}
-                    >
-                      + Add Task
-                    </button>
-                  </div>
+                            placeholder={index === 0 ? "What did you work on?" : "Another task..."}
+                          />
+                          {editingTasks.length > 1 && (
+                            <button
+                              type="button"
+                              className="btn-remove-task"
+                              onClick={() => {
+                                const newTasks = editingTasks.filter((_, i) => i !== index);
+                                setEditingTasks(newTasks);
+                              }}
+                            >
+                              −
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        className="btn-add-task"
+                        onClick={() => setEditingTasks([...editingTasks, ''])}
+                      >
+                        + Add Task
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -846,6 +1102,22 @@ function TimeClock() {
                           onClick={() => updateCurrentBlock('endTime', getEndTimeWithOffset(currentBlock.startTime))}
                         >
                           Now{(nowOffsetHours > 0 || nowOffsetMins > 0) ? '+' : ''}
+                        </button>
+                      </div>
+                      <div className="time-increment-btns">
+                        <button
+                          type="button"
+                          className="btn-increment"
+                          onClick={() => incrementEndTime(currentBlock, updateCurrentBlock, 15)}
+                        >
+                          +15m
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-increment"
+                          onClick={() => incrementEndTime(currentBlock, updateCurrentBlock, 60)}
+                        >
+                          +1hr
                         </button>
                       </div>
                     </div>
@@ -937,14 +1209,19 @@ function TimeClock() {
               </div>
             ) : (
               <div className="completed-list">
-                {completedBlocks.map((block, index) => (
+                {completedBlocks.map((block, index) => {
+                  // Count only work blocks for numbering
+                  const workBlockNumber = completedBlocks
+                    .slice(0, index + 1)
+                    .filter(b => !b.isBreak).length;
+                  return (
                   <div
                     key={block.id}
                     className={`completed-block ${block.isBreak ? 'break-block' : ''}`}
                   >
                     <div className="completed-block-header">
                       <span className="completed-number">
-                        {block.isBreak ? 'Break' : `Block #${index + 1}`}
+                        {block.isBreak ? 'Break' : `Block #${workBlockNumber}`}
                       </span>
                       <span className="completed-hours">
                         {calculateBlockHours(block.startTime, block.endTime)} hrs
@@ -960,11 +1237,11 @@ function TimeClock() {
                       <div className="completed-actions">
                         <button
                           type="button"
-                          className="btn-edit"
+                          className={`btn-edit ${block.isBreak ? 'btn-extend-break' : ''}`}
                           onClick={() => handleEditBlock(block)}
                           disabled={editingBlock !== null}
                         >
-                          Edit
+                          {block.isBreak ? 'Extend Break' : 'Edit'}
                         </button>
                         <button
                           type="button"
@@ -976,7 +1253,8 @@ function TimeClock() {
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </section>
