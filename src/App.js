@@ -291,7 +291,6 @@ function TimeClock() {
     if (insertIndex + 1 < updatedBlocks.length) {
       const nextBlock = updatedBlocks[insertIndex + 1];
       const nextStartMinutes = timeToMinutes(nextBlock.startTime);
-      const nextEndMinutes = timeToMinutes(nextBlock.endTime);
 
       // Handle overlaps
       if (editedEndMinutes > nextStartMinutes) {
@@ -1193,7 +1192,7 @@ function TimeClock() {
                 type="button"
                 className="btn-save"
                 onClick={previewShift}
-                disabled={completedBlocks.length === 0 && !currentBlock || saving}
+                disabled={(completedBlocks.length === 0 && !currentBlock) || saving}
               >
                 {saving ? 'Saving...' : 'Save Shift'}
               </button>
