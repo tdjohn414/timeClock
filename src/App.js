@@ -1,23 +1,41 @@
 import React, { useState, useEffect } from 'react';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { shiftsAPI } from './services/api';
+import Login from './components/Login';
+import Register from './components/Register';
 import './App.css';
 
-function App() {
+function TimeClock() {
+  const { user, logout } = useAuth();
   const [timeBlocks, setTimeBlocks] = useState([]);
-  const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [testBlocks, setTestBlocks] = useState(5);
+  const [testBreaks, setTestBreaks] = useState(2);
+  const [currentDate, setCurrentDate] = useState(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  });
   const [shifts, setShifts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  // Load saved shifts from localStorage on mount
+  // Load shifts from API on mount
   useEffect(() => {
-    const savedShifts = localStorage.getItem('timeClockShifts');
-    if (savedShifts) {
-      setShifts(JSON.parse(savedShifts));
-    }
+    const loadShifts = async () => {
+      try {
+        const data = await shiftsAPI.getAll();
+        setShifts(data);
+      } catch (err) {
+        console.error('Failed to load shifts:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadShifts();
   }, []);
-
-  // Save shifts to localStorage whenever they change
-  useEffect(() => {
-    localStorage.setItem('timeClockShifts', JSON.stringify(shifts));
-  }, [shifts]);
 
   const getCurrentTime = () => {
     const now = new Date();
@@ -33,84 +51,47 @@ function App() {
     return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
   };
 
+  const calculateBlockHours = (startTime, endTime) => {
+    if (!startTime || !endTime) return null;
+    const startDate = new Date(`2000-01-01T${startTime}`);
+    const endDate = new Date(`2000-01-01T${endTime}`);
+    const diffMs = endDate - startDate;
+    const diffHours = diffMs / (1000 * 60 * 60);
+    return diffHours > 0 ? diffHours.toFixed(2) : '0.00';
+  };
+
   const handleClockIn = () => {
-    // Create a new block with start time set to now
-    setTimeBlocks([
-      ...timeBlocks,
-      {
-        id: Date.now(),
-        startTime: getCurrentTime(),
-        endTime: '',
-        tasks: ''
-      }
-    ]);
-  };
-
-  const setBlockStartNow = (blockId) => {
-    setTimeBlocks(
-      timeBlocks.map(block =>
-        block.id === blockId ? { ...block, startTime: getCurrentTime() } : block
-      )
-    );
-  };
-
-  const setBlockEndNow = (blockId) => {
-    setTimeBlocks(
-      timeBlocks.map(block =>
-        block.id === blockId ? { ...block, endTime: getCurrentTime() } : block
-      )
-    );
+    const newBlock = {
+      id: Date.now(),
+      startTime: getCurrentTime(),
+      endTime: '',
+      tasks: ''
+    };
+    setTimeBlocks([...timeBlocks, newBlock]);
   };
 
   const handleBreak = () => {
     const startTime = getCurrentTime();
     const endTime = addMinutesToTime(startTime, 15);
-
-    setTimeBlocks([
-      ...timeBlocks,
-      {
-        id: Date.now(),
-        startTime,
-        endTime,
-        tasks: '15 min Break',
-        isBreak: true
-      }
-    ]);
-  };
-
-  const handleExtendBreak = (blockId) => {
-    const reason = prompt('Why do you need to extend your break?');
-    if (reason === null) return; // User cancelled
-
-    setTimeBlocks(
-      timeBlocks.map(block => {
-        if (block.id === blockId && block.isBreak) {
-          const newEndTime = getCurrentTime();
-          const extensionNote = reason.trim() ? ` (Extended: ${reason})` : ' (Extended)';
-          return {
-            ...block,
-            endTime: newEndTime,
-            tasks: block.tasks.replace(/15 min Break|Break/, 'Break') + extensionNote
-          };
-        }
-        return block;
-      })
-    );
+    const newBlock = {
+      id: Date.now(),
+      startTime,
+      endTime,
+      tasks: '15 min Break',
+      isBreak: true
+    };
+    setTimeBlocks([...timeBlocks, newBlock]);
   };
 
   const addTimeBlock = () => {
-    // Get the end time of the last block as the start time for the new block
     const lastEndTime = timeBlocks.length > 0 ? timeBlocks[timeBlocks.length - 1].endTime : '';
-
-    setTimeBlocks([
-      ...timeBlocks,
-      {
-        id: Date.now(),
-        startTime: lastEndTime,
-        endTime: '',
-        tasks: ''
-      }
-    ]);
+    const newBlock = {
+      id: Date.now(),
+      startTime: lastEndTime,
+      endTime: '',
+      tasks: ''
+    };
+    setTimeBlocks([...timeBlocks, newBlock]);
   };
 
   const updateTimeBlock = (id, field, value) => {
@@ -125,32 +106,77 @@ function App() {
     setTimeBlocks(timeBlocks.filter(block => block.id !== id));
   };
 
-  // Infer clock in/out from blocks
-  const getClockInTime = () => {
-    if (timeBlocks.length === 0) return null;
-    return timeBlocks[0].startTime;
-  };
+  const clientTasks = [
+    'Fixed responsive layout issues on mobile',
+    'Implemented form validation for user inputs',
+    'Added loading spinners and skeleton screens',
+    'Debugged API integration issues',
+    'Optimized React component rendering',
+    'Styled buttons and input components',
+    'Created reusable modal component',
+    'Fixed CSS grid alignment on dashboard',
+    'Implemented state management for cart',
+    'Added error handling for fetch requests',
+    'Built date picker component',
+    'Fixed cross-browser compatibility issues',
+    'Implemented infinite scroll pagination',
+    'Added toast notifications system',
+    'Refactored authentication flow'
+  ];
 
-  const getClockOutTime = () => {
-    if (timeBlocks.length === 0) return null;
-    return timeBlocks[timeBlocks.length - 1].endTime;
+  const generateTestShift = () => {
+    const blocks = [];
+    let currentHour = 8;
+    let currentMinute = 0;
+    let breakCount = 0;
+    const totalBlocks = testBlocks + testBreaks;
+    const breakInterval = Math.floor(totalBlocks / (testBreaks + 1));
+
+    for (let i = 0; i < totalBlocks; i++) {
+      const startTime = `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}`;
+      const isBreak = breakCount < testBreaks && (i + 1) % breakInterval === 0;
+      const duration = isBreak ? 15 : (45 + Math.floor(Math.random() * 45));
+
+      currentMinute += duration;
+      while (currentMinute >= 60) {
+        currentHour++;
+        currentMinute -= 60;
+      }
+
+      const endTime = `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}`;
+
+      if (isBreak) {
+        blocks.push({
+          id: Date.now() + i,
+          startTime,
+          endTime,
+          tasks: '15 min Break',
+          isBreak: true
+        });
+        breakCount++;
+      } else {
+        blocks.push({
+          id: Date.now() + i,
+          startTime,
+          endTime,
+          tasks: clientTasks[Math.floor(Math.random() * clientTasks.length)]
+        });
+      }
+    }
+
+    setTimeBlocks(blocks);
   };
 
   const calculateTotalHours = () => {
-    const clockIn = getClockInTime();
-    const clockOut = getClockOutTime();
-
-    if (!clockIn || !clockOut) return 0;
-
-    const clockInDate = new Date(`2000-01-01T${clockIn}`);
-    const clockOutDate = new Date(`2000-01-01T${clockOut}`);
-    const diffMs = clockOutDate - clockInDate;
-    const diffHours = diffMs / (1000 * 60 * 60);
-
-    return diffHours > 0 ? diffHours.toFixed(2) : 0;
+    let total = 0;
+    timeBlocks.forEach(block => {
+      const hrs = calculateBlockHours(block.startTime, block.endTime);
+      if (hrs) total += parseFloat(hrs);
+    });
+    return total.toFixed(2);
   };
 
-  const saveShift = () => {
+  const saveShift = async () => {
     const validBlocks = timeBlocks.filter(block => block.startTime && block.tasks);
 
     if (validBlocks.length === 0) {
@@ -160,14 +186,9 @@ function App() {
 
     const clockInTime = validBlocks[0].startTime;
     const clockOutTime = validBlocks[validBlocks.length - 1].endTime || validBlocks[validBlocks.length - 1].startTime;
+    const totalHours = calculateTotalHours();
 
-    const clockInDate = new Date(`2000-01-01T${clockInTime}`);
-    const clockOutDate = new Date(`2000-01-01T${clockOutTime}`);
-    const diffMs = clockOutDate - clockInDate;
-    const totalHours = diffMs > 0 ? (diffMs / (1000 * 60 * 60)).toFixed(2) : 0;
-
-    const newShift = {
-      id: Date.now(),
+    const shiftData = {
       date: currentDate,
       clockInTime,
       clockOutTime,
@@ -175,18 +196,20 @@ function App() {
       timeBlocks: validBlocks
     };
 
-    setShifts([newShift, ...shifts]);
-    setTimeBlocks([]);
-  };
-
-  const deleteShift = (id) => {
-    if (window.confirm('Are you sure you want to delete this shift?')) {
-      setShifts(shifts.filter(shift => shift.id !== id));
+    setSaving(true);
+    try {
+      const newShift = await shiftsAPI.create(shiftData);
+      setShifts([newShift, ...shifts]);
+      setTimeBlocks([]);
+    } catch (err) {
+      alert('Failed to save shift: ' + err.message);
+    } finally {
+      setSaving(false);
     }
   };
 
   const formatTime = (time) => {
-    if (!time) return '';
+    if (!time) return '--:--';
     const [hours, minutes] = time.split(':');
     const hour = parseInt(hours);
     const ampm = hour >= 12 ? 'PM' : 'AM';
@@ -196,193 +219,198 @@ function App() {
 
   const formatDate = (dateStr) => {
     const date = new Date(dateStr + 'T00:00:00');
-    return date.toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
+    return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   };
 
-  const clockInTime = getClockInTime();
-  const clockOutTime = getClockOutTime();
+  const lastBlockIndex = timeBlocks.length - 1;
+  const lastBlock = timeBlocks[lastBlockIndex];
+  const showBreakButton = lastBlock && !lastBlock.isBreak;
 
   return (
     <div className="app">
       <header className="header">
-        <h1>Time Clock</h1>
-        <p>Track your work hours and tasks</p>
-      </header>
-
-      <main className="main">
-        <section className="clock-section">
-          <h2>New Shift Entry</h2>
-
-          <div className="form-group">
-            <label htmlFor="date">Date</label>
-            <input
-              type="date"
-              id="date"
-              value={currentDate}
-              onChange={(e) => setCurrentDate(e.target.value)}
-            />
-          </div>
-
-          {clockInTime && (
-            <div className="shift-summary">
-              <div className="summary-row">
-                <span>Clock In:</span>
-                <strong>{formatTime(clockInTime)}</strong>
-              </div>
-              {clockOutTime && (
-                <>
-                  <div className="summary-row">
-                    <span>Clock Out:</span>
-                    <strong>{formatTime(clockOutTime)}</strong>
-                  </div>
-                  <div className="summary-row total">
-                    <span>Total Hours:</span>
-                    <strong>{calculateTotalHours()}</strong>
-                  </div>
-                </>
+        <div className="header-top">
+          <h1>Time Clock</h1>
+          <div className="header-right">
+            <div className="test-controls">
+              <select value={testBlocks} onChange={(e) => setTestBlocks(Number(e.target.value))}>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map(n => (
+                  <option key={n} value={n}>{n} blocks</option>
+                ))}
+              </select>
+              <select value={testBreaks} onChange={(e) => setTestBreaks(Number(e.target.value))}>
+                {[0, 1, 2, 3, 4].map(n => (
+                  <option key={n} value={n}>{n} breaks</option>
+                ))}
+              </select>
+              <button type="button" className="btn-test" onClick={generateTestShift}>
+                Generate
+              </button>
+              {timeBlocks.length > 0 && (
+                <button type="button" className="btn-clear" onClick={() => setTimeBlocks([])}>
+                  Clear
+                </button>
               )}
             </div>
-          )}
+            <div className="user-info">
+              <span>{user.name}</span>
+              <button className="btn-logout" onClick={logout}>Logout</button>
+            </div>
+          </div>
+        </div>
+      </header>
 
-          <div className="time-blocks-section">
-            <div className="section-header">
-              <h3>Time Blocks</h3>
-              <div className="section-header-buttons">
+      <main className="main-grid">
+        {/* Left Column - Time Entry */}
+        <section className="time-entry">
+          <div className="section-header">
+            <h2>Today's Shift</h2>
+            <div className="date-picker">
+              <input
+                type="date"
+                value={currentDate}
+                onChange={(e) => setCurrentDate(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="blocks-container">
+            {timeBlocks.length === 0 ? (
+              <div className="empty-state">
+                <p>No time blocks yet</p>
                 <button type="button" className="btn-clock-in" onClick={handleClockIn}>
                   Clock In
                 </button>
-                <button
-                  type="button"
-                  className="btn-break"
-                  onClick={handleBreak}
-                  disabled={timeBlocks.length === 0}
-                >
-                  Break
-                </button>
-                <button type="button" className="btn-add" onClick={addTimeBlock}>
-                  + Add Block
-                </button>
               </div>
-            </div>
-
-            {timeBlocks.length === 0 && (
-              <p className="hint">Click "Clock In" to start tracking your shift, or add blocks manually</p>
+            ) : (
+              <>
+                {timeBlocks.map((block, index) => {
+                  const blockHours = calculateBlockHours(block.startTime, block.endTime);
+                  const isLast = index === lastBlockIndex;
+                  return (
+                    <div key={block.id} className={`time-block ${block.isBreak ? 'break-block' : ''}`}>
+                      <div className="block-header">
+                        <span className="block-number">
+                          {block.isBreak ? 'Break' : `Block ${index + 1}`}
+                        </span>
+                        {blockHours && (
+                          <span className="block-hours">{blockHours} hrs</span>
+                        )}
+                        <button
+                          type="button"
+                          className="btn-remove"
+                          onClick={() => removeTimeBlock(block.id)}
+                        >
+                          &times;
+                        </button>
+                      </div>
+                      <div className="block-times">
+                        <div className="time-field">
+                          <label>Start</label>
+                          <div className="time-input-group">
+                            <input
+                              type="time"
+                              value={block.startTime}
+                              onChange={(e) => updateTimeBlock(block.id, 'startTime', e.target.value)}
+                            />
+                            <button
+                              type="button"
+                              className="btn-now"
+                              onClick={() => updateTimeBlock(block.id, 'startTime', getCurrentTime())}
+                            >
+                              Now
+                            </button>
+                          </div>
+                        </div>
+                        <div className="time-field">
+                          <label>End</label>
+                          <div className="time-input-group">
+                            <input
+                              type="time"
+                              value={block.endTime}
+                              onChange={(e) => updateTimeBlock(block.id, 'endTime', e.target.value)}
+                            />
+                            <button
+                              type="button"
+                              className="btn-now"
+                              onClick={() => updateTimeBlock(block.id, 'endTime', getCurrentTime())}
+                            >
+                              Now
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="task-field">
+                        <label>Tasks</label>
+                        <input
+                          type="text"
+                          value={block.tasks}
+                          onChange={(e) => updateTimeBlock(block.id, 'tasks', e.target.value)}
+                          placeholder="What did you work on?"
+                        />
+                      </div>
+                      {isLast && (
+                        <div className="block-actions">
+                          {showBreakButton && (
+                            <button type="button" className="btn-break" onClick={handleBreak}>
+                              + Break
+                            </button>
+                          )}
+                          <button type="button" className="btn-add-block" onClick={addTimeBlock}>
+                            + Add Block
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </>
             )}
-
-            {timeBlocks.map((block, index) => (
-              <div key={block.id} className={`time-block ${block.isBreak ? 'break-block' : ''}`}>
-                <div className="block-header">
-                  <div className="block-number">{block.isBreak ? 'Break' : `Block ${index + 1}`}</div>
-                  {block.isBreak && (
-                    <button
-                      type="button"
-                      className="btn-extend-break"
-                      onClick={() => handleExtendBreak(block.id)}
-                    >
-                      Extend Break
-                    </button>
-                  )}
-                </div>
-                <div className="time-block-times">
-                  <div className="time-input-group">
-                    <input
-                      type="time"
-                      placeholder="Start"
-                      value={block.startTime}
-                      onChange={(e) => updateTimeBlock(block.id, 'startTime', e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className="btn-now-small btn-start"
-                      onClick={() => setBlockStartNow(block.id)}
-                      title="Set to current time"
-                    >
-                      Now
-                    </button>
-                  </div>
-                  <span>to</span>
-                  <div className="time-input-group">
-                    <input
-                      type="time"
-                      placeholder="End"
-                      value={block.endTime}
-                      onChange={(e) => updateTimeBlock(block.id, 'endTime', e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className="btn-now-small btn-end"
-                      onClick={() => setBlockEndNow(block.id)}
-                      title="Set to current time"
-                    >
-                      Now
-                    </button>
-                  </div>
-                </div>
-                <textarea
-                  placeholder="What did you work on? (e.g., Task A, Task B)"
-                  value={block.tasks}
-                  onChange={(e) => updateTimeBlock(block.id, 'tasks', e.target.value)}
-                  rows={2}
-                />
-                <button
-                  type="button"
-                  className="btn-remove"
-                  onClick={() => removeTimeBlock(block.id)}
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
           </div>
 
-          <button
-            type="button"
-            className="btn-save"
-            onClick={saveShift}
-            disabled={timeBlocks.length === 0}
-          >
-            Save Shift
-          </button>
+          <div className="shift-summary">
+            <div className="total-hours">
+              <span>Total Hours:</span>
+              <strong>{calculateTotalHours()}</strong>
+            </div>
+            <button
+              type="button"
+              className="btn-save"
+              onClick={saveShift}
+              disabled={timeBlocks.length === 0 || saving}
+            >
+              {saving ? 'Saving...' : 'Save Shift'}
+            </button>
+          </div>
         </section>
 
-        <section className="history-section">
+        {/* Right Column - Shift History */}
+        <section className="shift-history">
           <h2>Shift History</h2>
-
-          {shifts.length === 0 ? (
-            <p className="no-shifts">No shifts recorded yet</p>
+          {loading ? (
+            <p className="loading-text">Loading shifts...</p>
+          ) : shifts.length === 0 ? (
+            <p className="empty-text">No shifts recorded yet</p>
           ) : (
-            <div className="shifts-list">
+            <div className="history-list">
               {shifts.map((shift) => (
-                <div key={shift.id} className="shift-card">
-                  <div className="shift-header">
-                    <div className="shift-date">{formatDate(shift.date)}</div>
-                    <button
-                      className="btn-delete"
-                      onClick={() => deleteShift(shift.id)}
-                    >
-                      Delete
-                    </button>
+                <div key={shift._id || shift.id} className="history-item">
+                  <div className="history-header">
+                    <span className="history-date">{formatDate(shift.date)}</span>
+                    <span className="history-hours">{shift.totalHours} hrs</span>
                   </div>
-                  <div className="shift-times">
-                    <span>{formatTime(shift.clockInTime)}</span>
-                    <span className="separator">→</span>
-                    <span>{formatTime(shift.clockOutTime)}</span>
-                    <span className="total">{shift.totalHours} hrs</span>
+                  <div className="history-times">
+                    {formatTime(shift.clockInTime)} - {formatTime(shift.clockOutTime)}
                   </div>
-                  {shift.timeBlocks.length > 0 && (
-                    <div className="shift-tasks">
-                      <h4>Tasks:</h4>
-                      {shift.timeBlocks.map((block, index) => (
-                        <div key={index} className="task-item">
-                          <span className="task-time">
-                            {formatTime(block.startTime)}{block.endTime ? ` - ${formatTime(block.endTime)}` : ''}
-                          </span>
-                          <span className="task-desc">{block.tasks}</span>
+                  {shift.timeBlocks && shift.timeBlocks.length > 0 && (
+                    <div className="history-tasks">
+                      {shift.timeBlocks.filter(b => !b.isBreak).map((block, i) => (
+                        <div key={i} className="history-task">
+                          <span className="task-time">{formatTime(block.startTime)}</span>
+                          <span className="task-text">{block.tasks}</span>
+                          {calculateBlockHours(block.startTime, block.endTime) && (
+                            <span className="task-hours">{calculateBlockHours(block.startTime, block.endTime)}h</span>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -394,6 +422,50 @@ function App() {
         </section>
       </main>
     </div>
+  );
+}
+
+function AppContent() {
+  const { isAuthenticated, loading } = useAuth();
+  const [showRegister, setShowRegister] = useState(() => {
+    return window.location.pathname === '/register';
+  });
+
+  const handleSwitchToLogin = () => {
+    setShowRegister(false);
+    window.history.pushState({}, '', '/');
+  };
+
+  const handleSwitchToRegister = () => {
+    setShowRegister(true);
+    window.history.pushState({}, '', '/register');
+  };
+
+  if (loading) {
+    return (
+      <div className="loading-screen">
+        <h1>Time Clock</h1>
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return showRegister ? (
+      <Register onSwitchToLogin={handleSwitchToLogin} />
+    ) : (
+      <Login onSwitchToRegister={handleSwitchToRegister} />
+    );
+  }
+
+  return <TimeClock />;
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 
