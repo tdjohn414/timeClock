@@ -5,6 +5,9 @@ import Login from './components/Login';
 import Register from './components/Register';
 import './App.css';
 
+// Hardcoded admin email
+const ADMIN_EMAIL = 'test2@test.com';
+
 function TimeClock() {
   const { user, logout } = useAuth();
   const [completedBlocks, setCompletedBlocks] = useState([]);
@@ -18,7 +21,10 @@ function TimeClock() {
   const [nowOffsetHours, setNowOffsetHours] = useState(0);
   const [nowOffsetMins, setNowOffsetMins] = useState(0);
   const [lastNowTime, setLastNowTime] = useState(null); // Track virtual "now" for testing
-  const [activeTab, setActiveTab] = useState('today'); // 'today' or 'history'
+  const [activeTab, setActiveTab] = useState('today'); // 'today', 'history', or 'admin'
+  const [adminShifts, setAdminShifts] = useState([]);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const isAdmin = user?.email === ADMIN_EMAIL;
   const [currentDate, setCurrentDate] = useState(() => {
     const now = new Date();
     const year = now.getFullYear();
@@ -45,6 +51,24 @@ function TimeClock() {
     };
     loadShifts();
   }, []);
+
+  // Load admin shifts when admin tab is selected
+  useEffect(() => {
+    if (activeTab === 'admin' && isAdmin && adminShifts.length === 0) {
+      const loadAdminShifts = async () => {
+        setAdminLoading(true);
+        try {
+          const data = await shiftsAPI.getAllAdmin();
+          setAdminShifts(data);
+        } catch (err) {
+          console.error('Failed to load admin shifts:', err);
+        } finally {
+          setAdminLoading(false);
+        }
+      };
+      loadAdminShifts();
+    }
+  }, [activeTab, isAdmin, adminShifts.length]);
 
   const getCurrentTime = () => {
     let baseTime;
@@ -567,6 +591,14 @@ function TimeClock() {
         >
           Shift History
         </button>
+        {isAdmin && (
+          <button
+            className={`tab-btn admin-tab ${activeTab === 'admin' ? 'active' : ''}`}
+            onClick={() => setActiveTab('admin')}
+          >
+            Admin View
+          </button>
+        )}
       </div>
 
       {activeTab === 'today' ? (
@@ -852,7 +884,7 @@ function TimeClock() {
             )}
           </section>
         </main>
-      ) : (
+      ) : activeTab === 'history' ? (
         /* Shift History Tab */
         <main className="history-tab">
           <section className="shift-history-full">
@@ -895,6 +927,64 @@ function TimeClock() {
                           >
                             ×
                           </button>
+                        </div>
+                      </div>
+                      {isExpanded && shift.timeBlocks && shift.timeBlocks.length > 0 && (
+                        <div className="history-tasks">
+                          {shift.timeBlocks.map((block, i) => (
+                            <div key={i} className={`history-task ${block.isBreak ? 'break-task' : ''}`}>
+                              <span className="task-time">
+                                {formatTime(block.startTime)} - {formatTime(block.endTime)}
+                              </span>
+                              <span className="task-text">
+                                {block.tasks.split(' • ').map((task, j) => (
+                                  <span key={j} className="task-line-inline">{task}</span>
+                                ))}
+                              </span>
+                              {calculateBlockHours(block.startTime, block.endTime) && (
+                                <span className="task-hours">{calculateBlockHours(block.startTime, block.endTime)}h</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </main>
+      ) : (
+        /* Admin View Tab */
+        <main className="history-tab admin-view">
+          <section className="shift-history-full">
+            <h2>All Users' Shifts</h2>
+            {adminLoading ? (
+              <p className="loading-text">Loading all shifts...</p>
+            ) : adminShifts.length === 0 ? (
+              <p className="empty-text">No shifts from any users yet</p>
+            ) : (
+              <div className="history-list">
+                {adminShifts.map((shift) => {
+                  const shiftId = shift._id || shift.id;
+                  const isExpanded = expandedShifts.has(shiftId);
+                  return (
+                    <div key={shiftId} className={`history-item ${isExpanded ? 'expanded' : ''}`}>
+                      <div className="history-header">
+                        <div
+                          className="history-header-left"
+                          onClick={() => toggleShiftExpanded(shiftId)}
+                        >
+                          <span className="expand-icon">{isExpanded ? '▼' : '▶'}</span>
+                          <span className="admin-user-name">{shift.userName || 'Unknown'}</span>
+                          <span className="history-date">{formatDate(shift.date)}</span>
+                          <span className="history-times-inline">
+                            {formatTime(shift.clockInTime)} - {formatTime(shift.clockOutTime)}
+                          </span>
+                        </div>
+                        <div className="history-header-right">
+                          <span className="history-hours">{shift.totalHours} hrs</span>
                         </div>
                       </div>
                       {isExpanded && shift.timeBlocks && shift.timeBlocks.length > 0 && (

@@ -115,4 +115,14 @@ export const shiftsAPI = {
     request(`/shifts/${id}`, {
       method: 'DELETE',
     }),
+
+  // Admin: get all shifts from all users
+  getAllAdmin: async () => {
+    const shifts = await request('/shifts/admin/all');
+    return Array.isArray(shifts) ? shifts.map(shift => ({
+      ...transformShift(shift),
+      userName: shift.user_name,
+      userEmail: shift.user_email
+    })) : [];
+  },
 };
