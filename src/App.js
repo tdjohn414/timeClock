@@ -15,6 +15,7 @@ function TimeClock() {
   const [testBreaks, setTestBreaks] = useState(2);
   const [nowOffsetHours, setNowOffsetHours] = useState(0);
   const [nowOffsetMins, setNowOffsetMins] = useState(0);
+  const [lastNowTime, setLastNowTime] = useState(null); // Track virtual "now" for testing
   const [activeTab, setActiveTab] = useState('today'); // 'today' or 'history'
   const [currentDate, setCurrentDate] = useState(() => {
     const now = new Date();
@@ -361,6 +362,19 @@ function TimeClock() {
                     <option key={n} value={n}>{n}m</option>
                   ))}
                 </select>
+                <button
+                  type="button"
+                  className="btn-random-task"
+                  onClick={() => {
+                    if (currentBlock) {
+                      const randomTask = clientTasks[Math.floor(Math.random() * clientTasks.length)];
+                      updateCurrentBlock('tasks', randomTask);
+                    }
+                  }}
+                  disabled={!currentBlock}
+                >
+                  Random Task
+                </button>
               </div>
             </div>
             <div className="user-info">
