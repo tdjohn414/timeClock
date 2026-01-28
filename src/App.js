@@ -37,6 +37,15 @@ function TimeClock() {
   const [editingShift, setEditingShift] = useState(null);
   const [viewingShift, setViewingShift] = useState(null);
   const [viewingShiftLoading, setViewingShiftLoading] = useState(false);
+  const [creatingShift, setCreatingShift] = useState(false);
+  const [newShiftData, setNewShiftData] = useState({
+    userId: '',
+    date: new Date().toISOString().split('T')[0],
+    clockInTime: '08:00',
+    clockOutTime: '17:00',
+    timeBlocks: [{ id: Date.now(), startTime: '08:00', endTime: '17:00', tasks: '', isBreak: false }]
+  });
+  const [savingShift, setSavingShift] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [creatingUser, setCreatingUser] = useState(false);
   const [newUserData, setNewUserData] = useState({ email: '', password: '', name: '', role: 'user', status: 'active' });
@@ -73,6 +82,14 @@ function TimeClock() {
   const [passwordError, setPasswordError] = useState('');
   const [passwordSuccess, setPasswordSuccess] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailData, setEmailData] = useState({ newEmail: '', password: '' });
+  const [emailError, setEmailError] = useState('');
+  const [emailSuccess, setEmailSuccess] = useState(false);
+  const [changingEmail, setChangingEmail] = useState(false);
+  const [resetPasswordUser, setResetPasswordUser] = useState(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState('');
+  const [resettingPassword, setResettingPassword] = useState(false);
   // Auto-save state
   const [pendingShiftId, setPendingShiftId] = useState(null);
   const [autoSaveStatus, setAutoSaveStatus] = useState('idle'); // 'idle', 'saving', 'saved', 'error'
@@ -248,6 +265,95 @@ function TimeClock() {
     } catch (err) {
       setAdminToast({ type: 'error', message: err.message || 'Failed to deactivate user' });
     }
+  };
+
+  const handleCreateShift = async () => {
+    if (!newShiftData.userId) {
+      setAdminToast({ type: 'error', message: 'Please select a user' });
+      return;
+    }
+    if (!newShiftData.date || !newShiftData.clockInTime) {
+      setAdminToast({ type: 'error', message: 'Date and clock in time are required' });
+      return;
+    }
+    if (newShiftData.timeBlocks.length === 0) {
+      setAdminToast({ type: 'error', message: 'Please add at least one time block' });
+      return;
+    }
+
+    setSavingShift(true);
+    try {
+      // Calculate total hours from time blocks
+      let totalMinutes = 0;
+      for (const block of newShiftData.timeBlocks) {
+        if (block.startTime && block.endTime && !block.isBreak) {
+          const [startH, startM] = block.startTime.split(':').map(Number);
+          const [endH, endM] = block.endTime.split(':').map(Number);
+          let mins = (endH * 60 + endM) - (startH * 60 + startM);
+          if (mins < 0) mins += 24 * 60; // overnight
+          totalMinutes += mins;
+        }
+      }
+      const totalHours = (totalMinutes / 60).toFixed(2);
+
+      await adminAPI.createShift({
+        userId: parseInt(newShiftData.userId),
+        date: newShiftData.date,
+        clockInTime: newShiftData.clockInTime,
+        clockOutTime: newShiftData.clockOutTime,
+        totalHours: parseFloat(totalHours),
+        timeBlocks: newShiftData.timeBlocks.map(b => ({
+          startTime: b.startTime,
+          endTime: b.endTime,
+          tasks: b.tasks,
+          isBreak: b.isBreak
+        }))
+      });
+
+      setAdminToast({ type: 'success', message: 'Shift created successfully' });
+      setCreatingShift(false);
+      setNewShiftData({
+        userId: '',
+        date: new Date().toISOString().split('T')[0],
+        clockInTime: '08:00',
+        clockOutTime: '17:00',
+        timeBlocks: [{ id: Date.now(), startTime: '08:00', endTime: '17:00', tasks: '', isBreak: false }]
+      });
+      loadAdminShifts(1);
+    } catch (err) {
+      setAdminToast({ type: 'error', message: err.message || 'Failed to create shift' });
+    } finally {
+      setSavingShift(false);
+    }
+  };
+
+  const addNewShiftBlock = () => {
+    const lastBlock = newShiftData.timeBlocks[newShiftData.timeBlocks.length - 1];
+    const newStartTime = lastBlock?.endTime || '08:00';
+    setNewShiftData({
+      ...newShiftData,
+      timeBlocks: [
+        ...newShiftData.timeBlocks,
+        { id: Date.now(), startTime: newStartTime, endTime: '', tasks: '', isBreak: false }
+      ]
+    });
+  };
+
+  const updateNewShiftBlock = (blockId, field, value) => {
+    setNewShiftData({
+      ...newShiftData,
+      timeBlocks: newShiftData.timeBlocks.map(b =>
+        b.id === blockId ? { ...b, [field]: value } : b
+      )
+    });
+  };
+
+  const removeNewShiftBlock = (blockId) => {
+    if (newShiftData.timeBlocks.length <= 1) return;
+    setNewShiftData({
+      ...newShiftData,
+      timeBlocks: newShiftData.timeBlocks.filter(b => b.id !== blockId)
+    });
   };
 
   const viewShiftDetails = async (shiftId) => {
@@ -822,6 +928,73 @@ function TimeClock() {
     setPasswordData({ current: '', new: '', confirm: '' });
     setPasswordError('');
     setPasswordSuccess(false);
+  };
+
+  const handleChangeEmail = async () => {
+    setEmailError('');
+
+    if (!emailData.newEmail || !emailData.password) {
+      setEmailError('Email and password are required');
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailData.newEmail)) {
+      setEmailError('Invalid email format');
+      return;
+    }
+
+    setChangingEmail(true);
+    try {
+      const result = await authAPI.changeEmail(emailData.newEmail, emailData.password);
+      // Update token in localStorage
+      if (result.token) {
+        localStorage.setItem('token', result.token);
+      }
+      setEmailSuccess(true);
+      setEmailData({ newEmail: '', password: '' });
+      setTimeout(() => {
+        setShowEmailModal(false);
+        setEmailSuccess(false);
+        // Reload to update user info
+        window.location.reload();
+      }, 2000);
+    } catch (err) {
+      setEmailError(err.message || 'Failed to change email');
+    } finally {
+      setChangingEmail(false);
+    }
+  };
+
+  const closeEmailModal = () => {
+    setShowEmailModal(false);
+    setEmailData({ newEmail: '', password: '' });
+    setEmailError('');
+    setEmailSuccess(false);
+  };
+
+  const handleAdminResetPassword = async () => {
+    if (!resetPasswordValue || resetPasswordValue.length < 6) {
+      setAdminToast({ type: 'error', message: 'Password must be at least 6 characters' });
+      return;
+    }
+
+    setResettingPassword(true);
+    try {
+      await adminAPI.resetUserPassword(resetPasswordUser.id, resetPasswordValue);
+      setAdminToast({ type: 'success', message: `Password reset for ${resetPasswordUser.name}` });
+      setResetPasswordUser(null);
+      setResetPasswordValue('');
+    } catch (err) {
+      setAdminToast({ type: 'error', message: err.message || 'Failed to reset password' });
+    } finally {
+      setResettingPassword(false);
+    }
+  };
+
+  const closeResetPasswordModal = () => {
+    setResetPasswordUser(null);
+    setResetPasswordValue('');
   };
 
   const clientTasks = [
@@ -1422,6 +1595,101 @@ function TimeClock() {
         </div>
       )}
 
+      {/* Email Change Modal */}
+      {showEmailModal && (
+        <div className="modal-overlay" onClick={closeEmailModal}>
+          <div className="preview-modal password-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Change Email</h2>
+              <button className="modal-close" onClick={closeEmailModal}>&times;</button>
+            </div>
+            <div className="modal-body">
+              {emailSuccess ? (
+                <div className="password-success">
+                  Email changed successfully!
+                </div>
+              ) : (
+                <>
+                  {emailError && (
+                    <div className="password-error">{emailError}</div>
+                  )}
+                  <div className="password-field">
+                    <label>New Email</label>
+                    <input
+                      type="email"
+                      value={emailData.newEmail}
+                      onChange={(e) => setEmailData({ ...emailData, newEmail: e.target.value })}
+                      placeholder="Enter new email address"
+                    />
+                  </div>
+                  <div className="password-field">
+                    <label>Current Password</label>
+                    <input
+                      type="password"
+                      value={emailData.password}
+                      onChange={(e) => setEmailData({ ...emailData, password: e.target.value })}
+                      placeholder="Enter your password to confirm"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+            {!emailSuccess && (
+              <div className="modal-footer">
+                <button className="btn-cancel-modal" onClick={closeEmailModal}>
+                  Cancel
+                </button>
+                <button
+                  className="btn-confirm-modal"
+                  onClick={handleChangeEmail}
+                  disabled={changingEmail}
+                >
+                  {changingEmail ? 'Changing...' : 'Change Email'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Admin Reset Password Modal */}
+      {resetPasswordUser && (
+        <div className="modal-overlay" onClick={closeResetPasswordModal}>
+          <div className="preview-modal password-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Reset Password</h2>
+              <button className="modal-close" onClick={closeResetPasswordModal}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ marginBottom: '16px', color: '#666' }}>
+                Reset password for <strong>{resetPasswordUser.name}</strong> ({resetPasswordUser.email})
+              </p>
+              <div className="password-field">
+                <label>New Password</label>
+                <input
+                  type="password"
+                  value={resetPasswordValue}
+                  onChange={(e) => setResetPasswordValue(e.target.value)}
+                  placeholder="Enter new password (min 6 characters)"
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-cancel-modal" onClick={closeResetPasswordModal}>
+                Cancel
+              </button>
+              <button
+                className="btn-confirm-modal"
+                onClick={handleAdminResetPassword}
+                disabled={resettingPassword}
+              >
+                {resettingPassword ? 'Resetting...' : 'Reset Password'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Recovery Modal */}
       {showRecoveryModal && recoveryShift && (
         <div className="modal-overlay">
@@ -1578,7 +1846,16 @@ function TimeClock() {
                         setShowUserDropdown(false);
                       }}
                     >
-                      Reset Password
+                      Change Password
+                    </button>
+                    <button
+                      className="dropdown-item"
+                      onClick={() => {
+                        setShowEmailModal(true);
+                        setShowUserDropdown(false);
+                      }}
+                    >
+                      Change Email
                     </button>
                     <button className="dropdown-item logout-item" onClick={logout}>
                       Logout
@@ -2079,9 +2356,21 @@ function TimeClock() {
                     </select>
                   </div>
                 </div>
-                <div className="modal-footer">
-                  <button className="btn-cancel-modal" onClick={() => setEditingUser(null)}>Cancel</button>
-                  <button className="btn-confirm-modal" onClick={() => handleUpdateUser(editingUser.id, editingUser)}>Save Changes</button>
+                <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
+                  <button
+                    className="btn-secondary"
+                    onClick={() => {
+                      setResetPasswordUser(editingUser);
+                      setEditingUser(null);
+                    }}
+                    style={{ background: '#e67e22', color: 'white' }}
+                  >
+                    Reset Password
+                  </button>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button className="btn-cancel-modal" onClick={() => setEditingUser(null)}>Cancel</button>
+                    <button className="btn-confirm-modal" onClick={() => handleUpdateUser(editingUser.id, editingUser)}>Save Changes</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2126,6 +2415,150 @@ function TimeClock() {
                 <div className="modal-footer">
                   <button className="btn-cancel-modal" onClick={() => { setCreatingUser(false); setNewUserData({ email: '', password: '', name: '', role: 'user', status: 'active' }); }}>Cancel</button>
                   <button className="btn-confirm-modal" onClick={handleCreateUser}>Create User</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Create Shift Modal */}
+          {creatingShift && (
+            <div className="modal-overlay" onClick={() => setCreatingShift(false)}>
+              <div className="preview-modal edit-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '700px', maxHeight: '90vh', overflow: 'auto' }}>
+                <div className="modal-header">
+                  <h2>Create Shift</h2>
+                  <button className="modal-close" onClick={() => setCreatingShift(false)}>&times;</button>
+                </div>
+                <div className="modal-body">
+                  <div className="form-field">
+                    <label>Employee *</label>
+                    <select
+                      value={newShiftData.userId}
+                      onChange={e => setNewShiftData({...newShiftData, userId: e.target.value})}
+                    >
+                      <option value="">Select User</option>
+                      {adminUsers.filter(u => u.status === 'active').map(u => (
+                        <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-field">
+                    <label>Date *</label>
+                    <input
+                      type="date"
+                      value={newShiftData.date}
+                      onChange={e => setNewShiftData({...newShiftData, date: e.target.value})}
+                    />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div className="form-field">
+                      <label>Clock In *</label>
+                      <input
+                        type="time"
+                        value={newShiftData.clockInTime}
+                        onChange={e => setNewShiftData({...newShiftData, clockInTime: e.target.value})}
+                      />
+                    </div>
+                    <div className="form-field">
+                      <label>Clock Out</label>
+                      <input
+                        type="time"
+                        value={newShiftData.clockOutTime}
+                        onChange={e => setNewShiftData({...newShiftData, clockOutTime: e.target.value})}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: '20px', borderTop: '1px solid #eee', paddingTop: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                      <h4 style={{ margin: 0, color: '#2c3e50' }}>Time Blocks</h4>
+                      <button
+                        type="button"
+                        onClick={addNewShiftBlock}
+                        style={{ background: '#9b59b6', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem' }}
+                      >
+                        + Add Block
+                      </button>
+                    </div>
+
+                    {newShiftData.timeBlocks.map((block, idx) => (
+                      <div
+                        key={block.id}
+                        style={{
+                          background: block.isBreak ? '#fef9e7' : '#f8f9fa',
+                          borderRadius: '8px',
+                          padding: '12px',
+                          marginBottom: '8px',
+                          borderLeft: `3px solid ${block.isBreak ? '#f39c12' : '#9b59b6'}`
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <span style={{ fontWeight: '600', fontSize: '0.9rem' }}>Block {idx + 1}</span>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.85rem', color: '#666' }}>
+                              <input
+                                type="checkbox"
+                                checked={block.isBreak}
+                                onChange={e => updateNewShiftBlock(block.id, 'isBreak', e.target.checked)}
+                              />
+                              Break
+                            </label>
+                            {newShiftData.timeBlocks.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => removeNewShiftBlock(block.id)}
+                                style={{ background: '#e74c3c', color: 'white', border: 'none', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                          <input
+                            type="time"
+                            value={block.startTime}
+                            onChange={e => updateNewShiftBlock(block.id, 'startTime', e.target.value)}
+                            placeholder="Start Time"
+                            style={{ padding: '8px', borderRadius: '6px', border: '1px solid #ddd' }}
+                          />
+                          <input
+                            type="time"
+                            value={block.endTime}
+                            onChange={e => updateNewShiftBlock(block.id, 'endTime', e.target.value)}
+                            placeholder="End Time"
+                            style={{ padding: '8px', borderRadius: '6px', border: '1px solid #ddd' }}
+                          />
+                        </div>
+                        {!block.isBreak && (
+                          <textarea
+                            value={block.tasks}
+                            onChange={e => updateNewShiftBlock(block.id, 'tasks', e.target.value)}
+                            placeholder="Tasks performed during this time block..."
+                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #ddd', resize: 'vertical', minHeight: '60px', fontSize: '0.9rem' }}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="modal-footer">
+                  <button className="btn-cancel-modal" onClick={() => {
+                    setCreatingShift(false);
+                    setNewShiftData({
+                      userId: '',
+                      date: new Date().toISOString().split('T')[0],
+                      clockInTime: '08:00',
+                      clockOutTime: '17:00',
+                      timeBlocks: [{ id: Date.now(), startTime: '08:00', endTime: '17:00', tasks: '', isBreak: false }]
+                    });
+                  }}>Cancel</button>
+                  <button
+                    className="btn-confirm-modal"
+                    onClick={handleCreateShift}
+                    disabled={savingShift}
+                  >
+                    {savingShift ? 'Creating...' : 'Create Shift'}
+                  </button>
                 </div>
               </div>
             </div>
@@ -2249,13 +2682,40 @@ function TimeClock() {
                     <div className="dashboard-section">
                       <h3>Recent Activity</h3>
                       <div className="activity-list">
-                        {dashboardData.recentActivity?.slice(0, 10).map((activity, i) => (
-                          <div key={i} className="activity-item">
-                            <span className="activity-action">{activity.action}</span>
-                            <span className="activity-target">{activity.target_type} #{activity.target_id}</span>
-                            <span className="activity-time">{new Date(activity.created_at).toLocaleString()}</span>
-                          </div>
-                        ))}
+                        {dashboardData.recentActivity?.slice(0, 10).map((activity, i) => {
+                          const targetName = activity.target_name || 'Unknown';
+                          const adminName = activity.admin_name || 'Admin';
+
+                          const formatAction = () => {
+                            switch (activity.action) {
+                              case 'user_created':
+                                return <><strong>{adminName}</strong> added new employee <strong>{targetName}</strong></>;
+                              case 'user_updated':
+                                return <><strong>{adminName}</strong> updated <strong>{targetName}</strong></>;
+                              case 'user_deactivated':
+                                return <><strong>{adminName}</strong> deactivated <strong>{targetName}</strong></>;
+                              case 'user_activated':
+                                return <><strong>{adminName}</strong> reactivated <strong>{targetName}</strong></>;
+                              case 'user_password_reset':
+                                return <><strong>{adminName}</strong> reset password for <strong>{targetName}</strong></>;
+                              case 'shift_created':
+                                return <><strong>{adminName}</strong> created shift for <strong>{targetName}</strong></>;
+                              case 'shift_updated':
+                                return <><strong>{adminName}</strong> edited <strong>{targetName}'s</strong> shift</>;
+                              case 'shift_deleted':
+                                return <><strong>{adminName}</strong> deleted <strong>{targetName}'s</strong> shift</>;
+                              default:
+                                return <><strong>{adminName}</strong> {activity.action.replace(/_/g, ' ')} <strong>{targetName}</strong></>;
+                            }
+                          };
+
+                          return (
+                            <div key={i} className="activity-item">
+                              <span className="activity-description">{formatAction()}</span>
+                              <span className="activity-time">{new Date(activity.created_at).toLocaleString()}</span>
+                            </div>
+                          );
+                        })}
                         {(!dashboardData.recentActivity || dashboardData.recentActivity.length === 0) && (
                           <p className="empty-text">No recent admin activity</p>
                         )}
@@ -2409,21 +2869,24 @@ function TimeClock() {
             ) : (
               /* Shifts List */
               <div className="admin-content">
-                <div className="filters-bar">
-                  <input
-                    type="date"
-                    placeholder="Start Date"
-                    value={adminShiftsFilters.startDate}
-                    onChange={e => setAdminShiftsFilters({...adminShiftsFilters, startDate: e.target.value})}
-                  />
-                  <input
-                    type="date"
-                    placeholder="End Date"
-                    value={adminShiftsFilters.endDate}
-                    onChange={e => setAdminShiftsFilters({...adminShiftsFilters, endDate: e.target.value})}
-                  />
-                  <button className="btn-filter" onClick={() => loadAdminShifts(1)}>Apply Filters</button>
-                  <button className="btn-clear-filter" onClick={() => { setAdminShiftsFilters({ userId: '', startDate: '', endDate: '' }); loadAdminShifts(1); }}>Clear</button>
+                <div className="filters-bar" style={{ justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      type="date"
+                      placeholder="Start Date"
+                      value={adminShiftsFilters.startDate}
+                      onChange={e => setAdminShiftsFilters({...adminShiftsFilters, startDate: e.target.value})}
+                    />
+                    <input
+                      type="date"
+                      placeholder="End Date"
+                      value={adminShiftsFilters.endDate}
+                      onChange={e => setAdminShiftsFilters({...adminShiftsFilters, endDate: e.target.value})}
+                    />
+                    <button className="btn-filter" onClick={() => loadAdminShifts(1)}>Apply Filters</button>
+                    <button className="btn-clear-filter" onClick={() => { setAdminShiftsFilters({ userId: '', startDate: '', endDate: '' }); loadAdminShifts(1); }}>Clear</button>
+                  </div>
+                  <button className="btn-create" onClick={() => { if (adminUsers.length === 0) loadAdminUsers(); setCreatingShift(true); }}>+ Create Shift</button>
                 </div>
 
                 {adminLoading ? (

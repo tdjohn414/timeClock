@@ -47,6 +47,12 @@ export const authAPI = {
       method: 'POST',
       body: JSON.stringify({ currentPassword, newPassword }),
     }),
+
+  changeEmail: (newEmail, password) =>
+    request('/auth/change-email', {
+      method: 'POST',
+      body: JSON.stringify({ newEmail, password }),
+    }),
 };
 
 /**
@@ -281,6 +287,12 @@ export const adminAPI = {
   },
 
   getShift: (id) => request(`/admin/shifts/${id}`),
+
+  createShift: (data) =>
+    request('/admin/shifts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 
   updateShift: (id, data) =>
     request(`/admin/shifts/${id}`, {
