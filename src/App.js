@@ -2733,7 +2733,23 @@ function TimeClock() {
                           return (
                             <div key={i} className="activity-item">
                               <span className="activity-description">{formatAction()}</span>
-                              <span className="activity-time">{new Date(activity.created_at).toLocaleString()}</span>
+                              <span className="activity-time">{(() => {
+                                const raw = activity.created_at;
+                                console.log('RAW TIMESTAMP:', raw);
+                                if (!raw) return '';
+                                // Parse UTC timestamp and convert to local time
+                                const match = String(raw).match(/(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
+                                if (match) {
+                                  const utc = Date.UTC(
+                                    parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]),
+                                    parseInt(match[4]), parseInt(match[5]), parseInt(match[6])
+                                  );
+                                  const result = new Date(utc).toLocaleString();
+                                  console.log('CONVERTED:', result);
+                                  return result;
+                                }
+                                return new Date(raw).toLocaleString();
+                              })()}</span>
                             </div>
                           );
                         })}
