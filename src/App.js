@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { shiftsAPI, authAPI, adminAPI } from './services/api';
+import { shiftsAPI, authAPI, adminAPI, localTimeToUTC } from './services/api';
 import Login from './components/Login';
 import Register from './components/Register';
 import './App.css';
@@ -299,12 +299,12 @@ function TimeClock() {
       await adminAPI.createShift({
         userId: parseInt(newShiftData.userId),
         date: newShiftData.date,
-        clockInTime: newShiftData.clockInTime,
-        clockOutTime: newShiftData.clockOutTime,
+        clockInTime: localTimeToUTC(newShiftData.clockInTime, newShiftData.date),
+        clockOutTime: localTimeToUTC(newShiftData.clockOutTime, newShiftData.date),
         totalHours: parseFloat(totalHours),
         timeBlocks: newShiftData.timeBlocks.map(b => ({
-          startTime: b.startTime,
-          endTime: b.endTime,
+          startTime: localTimeToUTC(b.startTime, newShiftData.date),
+          endTime: localTimeToUTC(b.endTime, newShiftData.date),
           tasks: b.tasks,
           isBreak: b.isBreak
         }))
@@ -523,8 +523,8 @@ function TimeClock() {
   const handleClockIn = async () => {
     try {
       const clockInTime = getStartTime();
-      // Create pending shift on server
-      const shift = await shiftsAPI.clockIn(currentDate, clockInTime);
+      // Create pending shift on server - convert to UTC for storage
+      const shift = await shiftsAPI.clockIn(currentDate, localTimeToUTC(clockInTime, currentDate));
       setPendingShiftId(shift.id);
 
       const newBlock = {
@@ -564,8 +564,8 @@ function TimeClock() {
         try {
           setAutoSaveStatus('saving');
           const savedBlock = await shiftsAPI.addBlock(pendingShiftId, {
-            startTime: completedBlock.startTime,
-            endTime: completedBlock.endTime,
+            startTime: localTimeToUTC(completedBlock.startTime, currentDate),
+            endTime: localTimeToUTC(completedBlock.endTime, currentDate),
             tasks: completedBlock.tasks,
             isBreak: completedBlock.isBreak || false
           });
@@ -624,8 +624,8 @@ function TimeClock() {
       if (pendingShiftId) {
         try {
           const savedBlock = await shiftsAPI.addBlock(pendingShiftId, {
-            startTime: workBlock.startTime,
-            endTime: workBlock.endTime,
+            startTime: localTimeToUTC(workBlock.startTime, currentDate),
+            endTime: localTimeToUTC(workBlock.endTime, currentDate),
             tasks: workBlock.tasks,
             isBreak: false
           });
@@ -655,8 +655,8 @@ function TimeClock() {
         try {
           setAutoSaveStatus('saving');
           const savedBreak = await shiftsAPI.addBlock(pendingShiftId, {
-            startTime: breakBlock.startTime,
-            endTime: breakBlock.endTime,
+            startTime: localTimeToUTC(breakBlock.startTime, currentDate),
+            endTime: localTimeToUTC(breakBlock.endTime, currentDate),
             tasks: breakBlock.tasks,
             isBreak: true
           });
@@ -1132,10 +1132,28 @@ function TimeClock() {
       let completedShift;
 
       if (pendingShiftId) {
-        // Complete the pending shift (clock out)
+        // Save any unsaved current block before clock out
+        // The current block is included in previewShiftData.timeBlocks but may not have been saved yet
+        const currentJoinedTasks = joinTasks(currentTasks);
+        if (currentBlock && currentBlock.startTime && currentBlock.endTime && currentJoinedTasks) {
+          // Check if this block was already saved (exists in completedBlocks)
+          const alreadySaved = completedBlocks.some(b => b.id === currentBlock.id);
+          if (!alreadySaved) {
+            await shiftsAPI.addBlock(pendingShiftId, {
+              startTime: localTimeToUTC(currentBlock.startTime, previewShiftData.date),
+              endTime: localTimeToUTC(currentBlock.endTime, previewShiftData.date),
+              tasks: currentJoinedTasks,
+              isBreak: currentBlock.isBreak || false
+            });
+          }
+        }
+
+        // Complete the pending shift (clock out) - convert to UTC
+        // Send both clockInTime (from first block) and clockOutTime (from last block)
         completedShift = await shiftsAPI.clockOut(
           pendingShiftId,
-          previewShiftData.clockOutTime,
+          localTimeToUTC(previewShiftData.clockInTime, previewShiftData.date),
+          localTimeToUTC(previewShiftData.clockOutTime, previewShiftData.date),
           previewShiftData.totalHours
         );
       } else {
@@ -1242,13 +1260,16 @@ function TimeClock() {
         if (hrs) totalHours += parseFloat(hrs);
       });
 
-      // Get clock out time from last block's end time
+      // Get clock in/out times from first/last blocks
+      const firstBlock = recoveryShift.timeBlocks[0];
       const lastBlock = recoveryShift.timeBlocks[recoveryShift.timeBlocks.length - 1];
+      const clockInTime = firstBlock.startTime;
       const clockOutTime = lastBlock.endTime;
 
-      // Complete the shift
+      // Complete the shift (times already in UTC from server)
       const completedShift = await shiftsAPI.clockOut(
         recoveryShift.id,
+        clockInTime,
         clockOutTime,
         totalHours.toFixed(2)
       );

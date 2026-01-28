@@ -56,6 +56,18 @@ export const authAPI = {
 };
 
 /**
+ * Convert a local time (HH:MM) + date (YYYY-MM-DD) to UTC ISO string.
+ * This ensures times entered by the user are stored correctly regardless of server timezone.
+ */
+export const localTimeToUTC = (time, date) => {
+  if (!time || !date) return null;
+  // Create a Date object in the user's local timezone
+  const localDateTime = new Date(`${date}T${time}:00`);
+  // Convert to ISO string (UTC)
+  return localDateTime.toISOString();
+};
+
+/**
  * Normalize a time value to HH:MM format for display.
  * Handles: ISO timestamps, "HH:MM:SS", "HH:MM", or null
  */
@@ -218,10 +230,10 @@ export const shiftsAPI = {
   },
 
   // Clock out - complete shift
-  clockOut: async (shiftId, clockOutTime, totalHours) => {
+  clockOut: async (shiftId, clockInTime, clockOutTime, totalHours) => {
     const shift = await request(`/shifts/${shiftId}/clock-out`, {
       method: 'POST',
-      body: JSON.stringify({ clockOutTime, totalHours }),
+      body: JSON.stringify({ clockInTime, clockOutTime, totalHours }),
     });
     return transformShift(shift);
   },
