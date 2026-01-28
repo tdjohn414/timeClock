@@ -49,11 +49,37 @@ export const authAPI = {
     }),
 };
 
+/**
+ * Normalize a time value to HH:MM format for display.
+ * Handles: ISO timestamps, "HH:MM:SS", "HH:MM", or null
+ */
+const normalizeTime = (value) => {
+  if (!value) return null;
+
+  // If it's an ISO timestamp (contains T or has date part)
+  if (typeof value === 'string' && (value.includes('T') || value.includes(' ') && value.includes('-'))) {
+    const date = new Date(value);
+    if (!isNaN(date.getTime())) {
+      const h = String(date.getHours()).padStart(2, '0');
+      const m = String(date.getMinutes()).padStart(2, '0');
+      return `${h}:${m}`;
+    }
+  }
+
+  // If it's already a time string (HH:MM or HH:MM:SS)
+  if (typeof value === 'string') {
+    const parts = value.split(':');
+    if (parts.length >= 2) {
+      return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+    }
+  }
+
+  return value;
+};
+
 // Transform snake_case DB fields to camelCase for frontend
 const transformShift = (shift) => {
   if (!shift) return shift;
-
-  console.log('Raw shift from API:', shift);
 
   // Transform time blocks if they exist
   let timeBlocks = shift.timeBlocks || shift.time_blocks;
@@ -68,11 +94,10 @@ const transformShift = (shift) => {
   // Transform each time block from snake_case if needed
   if (Array.isArray(timeBlocks)) {
     timeBlocks = timeBlocks.map(block => {
-      console.log('Raw block:', block);
       return {
         id: block.id,
-        startTime: block.startTime || block.start_time || null,
-        endTime: block.endTime || block.end_time || null,
+        startTime: normalizeTime(block.startTime || block.start_time),
+        endTime: normalizeTime(block.endTime || block.end_time),
         tasks: block.tasks || '',
         isBreak: block.isBreak ?? block.is_break ?? false
       };
@@ -82,14 +107,14 @@ const transformShift = (shift) => {
   const transformed = {
     id: shift.id || shift._id,
     date: shift.date,
-    clockInTime: shift.clockInTime || shift.clock_in_time || null,
-    clockOutTime: shift.clockOutTime || shift.clock_out_time || null,
+    clockInTime: normalizeTime(shift.clockInTime || shift.clock_in_time),
+    clockOutTime: normalizeTime(shift.clockOutTime || shift.clock_out_time),
     totalHours: shift.totalHours || shift.total_hours || '0',
+    status: shift.status || 'completed',
     timeBlocks: timeBlocks || [],
     createdAt: shift.createdAt || shift.created_at
   };
 
-  console.log('Transformed shift:', transformed);
   return transformed;
 };
 
@@ -132,5 +157,205 @@ export const shiftsAPI = {
       userName: shift.user_name,
       userEmail: shift.user_email
     })) : [];
+  },
+
+  // Get pending shift for recovery
+  getPending: async () => {
+    const shift = await request('/shifts/pending');
+    return shift ? transformShift(shift) : null;
+  },
+
+  // Clock in - create or get pending shift
+  clockIn: async (date, clockInTime) => {
+    const shift = await request('/shifts/clock-in', {
+      method: 'POST',
+      body: JSON.stringify({ date, clockInTime }),
+    });
+    return transformShift(shift);
+  },
+
+  // Add block to shift
+  addBlock: async (shiftId, blockData) => {
+    const block = await request(`/shifts/${shiftId}/blocks`, {
+      method: 'POST',
+      body: JSON.stringify(blockData),
+    });
+    return {
+      id: block.id,
+      startTime: block.start_time,
+      endTime: block.end_time,
+      tasks: block.tasks,
+      isBreak: block.is_break
+    };
+  },
+
+  // Update block
+  updateBlock: async (shiftId, blockId, blockData) => {
+    const block = await request(`/shifts/${shiftId}/blocks/${blockId}`, {
+      method: 'PUT',
+      body: JSON.stringify(blockData),
+    });
+    return {
+      id: block.id,
+      startTime: block.start_time,
+      endTime: block.end_time,
+      tasks: block.tasks,
+      isBreak: block.is_break
+    };
+  },
+
+  // Delete block
+  deleteBlock: async (shiftId, blockId) => {
+    return request(`/shifts/${shiftId}/blocks/${blockId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Clock out - complete shift
+  clockOut: async (shiftId, clockOutTime, totalHours) => {
+    const shift = await request(`/shifts/${shiftId}/clock-out`, {
+      method: 'POST',
+      body: JSON.stringify({ clockOutTime, totalHours }),
+    });
+    return transformShift(shift);
+  },
+
+  // Discard pending shift
+  discard: async (shiftId) => {
+    return request(`/shifts/${shiftId}/discard`, {
+      method: 'DELETE',
+    });
+  },
+};
+
+// Admin API
+export const adminAPI = {
+  // Dashboard
+  getDashboard: () => request('/admin/dashboard'),
+
+  // Users
+  getUsers: (params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    return request(`/admin/users${queryString ? `?${queryString}` : ''}`);
+  },
+
+  createUser: (data) =>
+    request('/admin/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getUser: (id) => request(`/admin/users/${id}`),
+
+  updateUser: (id, data) =>
+    request(`/admin/users/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deactivateUser: (id) =>
+    request(`/admin/users/${id}`, {
+      method: 'DELETE',
+    }),
+
+  activateUser: (id) =>
+    request(`/admin/users/${id}/activate`, {
+      method: 'POST',
+    }),
+
+  resetUserPassword: (id, newPassword) =>
+    request(`/admin/users/${id}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify({ newPassword }),
+    }),
+
+  getUserShifts: async (id, params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    return request(`/admin/users/${id}/shifts${queryString ? `?${queryString}` : ''}`);
+  },
+
+  // Shifts
+  getShifts: async (params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    return request(`/admin/shifts${queryString ? `?${queryString}` : ''}`);
+  },
+
+  getShift: (id) => request(`/admin/shifts/${id}`),
+
+  updateShift: (id, data) =>
+    request(`/admin/shifts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteShift: (id) =>
+    request(`/admin/shifts/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // Database Browser
+  getTables: () => request('/admin/database/tables'),
+
+  getTableData: (tableName, params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    return request(`/admin/database/table/${tableName}${queryString ? `?${queryString}` : ''}`);
+  },
+
+  getTableRow: (tableName, id) => request(`/admin/database/table/${tableName}/${id}`),
+
+  updateTableRow: (tableName, id, data) =>
+    request(`/admin/database/table/${tableName}/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteTableRow: (tableName, id) =>
+    request(`/admin/database/table/${tableName}/${id}`, {
+      method: 'DELETE',
+    }),
+
+  insertTableRow: (tableName, data) =>
+    request(`/admin/database/table/${tableName}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  // Reports
+  exportData: (params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    return request(`/admin/reports/export${queryString ? `?${queryString}` : ''}`);
+  },
+
+  getReportSummary: (params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    return request(`/admin/reports/summary${queryString ? `?${queryString}` : ''}`);
+  },
+
+  // Download CSV export
+  downloadExport: async (params = {}) => {
+    const token = localStorage.getItem('token');
+    const queryString = new URLSearchParams({ ...params, format: 'csv' }).toString();
+    const response = await fetch(
+      `${API_URL}/admin/reports/export?${queryString}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error('Export failed');
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${params.type || 'export'}_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
   },
 };

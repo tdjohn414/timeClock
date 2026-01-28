@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { shiftsAPI, authAPI } from './services/api';
+import { shiftsAPI, authAPI, adminAPI } from './services/api';
 import Login from './components/Login';
 import Register from './components/Register';
 import './App.css';
@@ -24,7 +24,30 @@ function TimeClock() {
   const [activeTab, setActiveTab] = useState('today'); // 'today', 'history', or 'admin'
   const [adminShifts, setAdminShifts] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
-  const isAdmin = user?.email === ADMIN_EMAIL;
+  const isAdmin = user?.email === ADMIN_EMAIL || user?.role === 'admin';
+
+  // Admin Panel State
+  const [adminSubTab, setAdminSubTab] = useState('dashboard');
+  const [dashboardData, setDashboardData] = useState(null);
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [adminUsersLoading, setAdminUsersLoading] = useState(false);
+  const [adminUsersPagination, setAdminUsersPagination] = useState({ page: 1, limit: 25, total: 0 });
+  const [adminShiftsPagination, setAdminShiftsPagination] = useState({ page: 1, limit: 25, total: 0 });
+  const [adminShiftsFilters, setAdminShiftsFilters] = useState({ userId: '', startDate: '', endDate: '' });
+  const [editingShift, setEditingShift] = useState(null);
+  const [viewingShift, setViewingShift] = useState(null);
+  const [viewingShiftLoading, setViewingShiftLoading] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [newUserData, setNewUserData] = useState({ email: '', password: '', name: '', role: 'user', status: 'active' });
+  const [dbTables, setDbTables] = useState([]);
+  const [selectedTable, setSelectedTable] = useState(null);
+  const [tableData, setTableData] = useState({ rows: [], pagination: {}, schema: [], config: {} });
+  const [tableLoading, setTableLoading] = useState(false);
+  const [editingRow, setEditingRow] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [adminToast, setAdminToast] = useState(null);
   const [currentDate, setCurrentDate] = useState(() => {
     const now = new Date();
     const year = now.getFullYear();
@@ -50,6 +73,12 @@ function TimeClock() {
   const [passwordError, setPasswordError] = useState('');
   const [passwordSuccess, setPasswordSuccess] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+  // Auto-save state
+  const [pendingShiftId, setPendingShiftId] = useState(null);
+  const [autoSaveStatus, setAutoSaveStatus] = useState('idle'); // 'idle', 'saving', 'saved', 'error'
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+  const [recoveryShift, setRecoveryShift] = useState(null);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
 
   useEffect(() => {
     const loadShifts = async () => {
@@ -65,23 +94,230 @@ function TimeClock() {
     loadShifts();
   }, []);
 
-  // Load admin shifts when admin tab is selected
+  // Set default tab to admin for admin users
   useEffect(() => {
-    if (activeTab === 'admin' && isAdmin && adminShifts.length === 0) {
-      const loadAdminShifts = async () => {
-        setAdminLoading(true);
-        try {
-          const data = await shiftsAPI.getAllAdmin();
-          setAdminShifts(data);
-        } catch (err) {
-          console.error('Failed to load admin shifts:', err);
-        } finally {
-          setAdminLoading(false);
-        }
-      };
-      loadAdminShifts();
+    if (isAdmin) {
+      setActiveTab('admin');
     }
-  }, [activeTab, isAdmin, adminShifts.length]);
+  }, [isAdmin]);
+
+  // Check for pending shift on load (for recovery)
+  useEffect(() => {
+    const checkPendingShift = async () => {
+      try {
+        const pending = await shiftsAPI.getPending();
+        if (pending && pending.id) {
+          setRecoveryShift(pending);
+          setShowRecoveryModal(true);
+        }
+      } catch (err) {
+        console.error('Failed to check pending shift:', err);
+      }
+    };
+    checkPendingShift();
+  }, []);
+
+  // Load admin data when admin tab is selected
+  useEffect(() => {
+    if (activeTab === 'admin' && isAdmin) {
+      if (adminSubTab === 'dashboard' && !dashboardData) {
+        loadDashboard();
+      } else if (adminSubTab === 'users' && adminUsers.length === 0) {
+        loadAdminUsers();
+      } else if (adminSubTab === 'shifts' && adminShifts.length === 0) {
+        loadAdminShifts();
+      } else if (adminSubTab === 'database' && dbTables.length === 0) {
+        loadDbTables();
+      }
+    }
+  }, [activeTab, adminSubTab, isAdmin]);
+
+  const loadDashboard = async () => {
+    setAdminLoading(true);
+    try {
+      const data = await adminAPI.getDashboard();
+      setDashboardData(data);
+    } catch (err) {
+      console.error('Failed to load dashboard:', err);
+      setAdminToast({ type: 'error', message: 'Failed to load dashboard' });
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const loadAdminUsers = async (page = 1) => {
+    setAdminUsersLoading(true);
+    try {
+      const data = await adminAPI.getUsers({ page, limit: 25 });
+      setAdminUsers(data.users);
+      setAdminUsersPagination(data.pagination);
+    } catch (err) {
+      console.error('Failed to load users:', err);
+      setAdminToast({ type: 'error', message: 'Failed to load users' });
+    } finally {
+      setAdminUsersLoading(false);
+    }
+  };
+
+  const loadAdminShifts = async (page = 1) => {
+    setAdminLoading(true);
+    try {
+      const params = { page, limit: 25, ...adminShiftsFilters };
+      Object.keys(params).forEach(k => !params[k] && delete params[k]);
+      const data = await adminAPI.getShifts(params);
+      setAdminShifts(data.shifts.map(s => ({
+        ...s,
+        userName: s.user_name,
+        userEmail: s.user_email
+      })));
+      setAdminShiftsPagination(data.pagination);
+    } catch (err) {
+      console.error('Failed to load shifts:', err);
+      setAdminToast({ type: 'error', message: 'Failed to load shifts' });
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const loadDbTables = async () => {
+    setTableLoading(true);
+    try {
+      const data = await adminAPI.getTables();
+      setDbTables(data.tables);
+    } catch (err) {
+      console.error('Failed to load tables:', err);
+      setAdminToast({ type: 'error', message: 'Failed to load database tables' });
+    } finally {
+      setTableLoading(false);
+    }
+  };
+
+  const loadTableData = async (tableName, page = 1) => {
+    setTableLoading(true);
+    try {
+      const data = await adminAPI.getTableData(tableName, { page, limit: 25 });
+      setTableData(data);
+      setSelectedTable(tableName);
+    } catch (err) {
+      console.error('Failed to load table data:', err);
+      setAdminToast({ type: 'error', message: 'Failed to load table data' });
+    } finally {
+      setTableLoading(false);
+    }
+  };
+
+  const handleUpdateUser = async (userId, updates) => {
+    try {
+      await adminAPI.updateUser(userId, updates);
+      setAdminToast({ type: 'success', message: 'User updated successfully' });
+      setEditingUser(null);
+      loadAdminUsers(adminUsersPagination.page);
+    } catch (err) {
+      setAdminToast({ type: 'error', message: err.message || 'Failed to update user' });
+    }
+  };
+
+  const handleCreateUser = async () => {
+    try {
+      if (!newUserData.email || !newUserData.password || !newUserData.name) {
+        setAdminToast({ type: 'error', message: 'Email, password, and name are required' });
+        return;
+      }
+      if (newUserData.password.length < 6) {
+        setAdminToast({ type: 'error', message: 'Password must be at least 6 characters' });
+        return;
+      }
+      await adminAPI.createUser(newUserData);
+      setAdminToast({ type: 'success', message: 'User created successfully' });
+      setCreatingUser(false);
+      setNewUserData({ email: '', password: '', name: '', role: 'user', status: 'active' });
+      loadAdminUsers(1);
+    } catch (err) {
+      setAdminToast({ type: 'error', message: err.message || 'Failed to create user' });
+    }
+  };
+
+  const handleDeactivateUser = async (userId) => {
+    if (deleteConfirmText !== 'DELETE') return;
+    try {
+      await adminAPI.deactivateUser(userId);
+      setAdminToast({ type: 'success', message: 'User deactivated' });
+      setDeleteConfirm(null);
+      setDeleteConfirmText('');
+      loadAdminUsers(adminUsersPagination.page);
+    } catch (err) {
+      setAdminToast({ type: 'error', message: err.message || 'Failed to deactivate user' });
+    }
+  };
+
+  const viewShiftDetails = async (shiftId) => {
+    try {
+      setViewingShiftLoading(true);
+      const shift = await adminAPI.getShift(shiftId);
+      setViewingShift(shift);
+    } catch (err) {
+      setAdminToast({ type: 'error', message: err.message || 'Failed to load shift details' });
+    } finally {
+      setViewingShiftLoading(false);
+    }
+  };
+
+  const handleUpdateShift = async (shiftId, updates) => {
+    try {
+      await adminAPI.updateShift(shiftId, updates);
+      setAdminToast({ type: 'success', message: 'Shift updated successfully' });
+      setEditingShift(null);
+      loadAdminShifts(adminShiftsPagination.page);
+    } catch (err) {
+      setAdminToast({ type: 'error', message: err.message || 'Failed to update shift' });
+    }
+  };
+
+  const handleDeleteShift = async (shiftId) => {
+    if (deleteConfirmText !== 'DELETE') return;
+    try {
+      await adminAPI.deleteShift(shiftId);
+      setAdminToast({ type: 'success', message: 'Shift deleted' });
+      setDeleteConfirm(null);
+      setDeleteConfirmText('');
+      loadAdminShifts(adminShiftsPagination.page);
+    } catch (err) {
+      setAdminToast({ type: 'error', message: err.message || 'Failed to delete shift' });
+    }
+  };
+
+  const handleUpdateRow = async (tableName, rowId, updates) => {
+    try {
+      await adminAPI.updateTableRow(tableName, rowId, updates);
+      setAdminToast({ type: 'success', message: 'Row updated successfully' });
+      setEditingRow(null);
+      loadTableData(tableName, tableData.pagination.page);
+    } catch (err) {
+      setAdminToast({ type: 'error', message: err.message || 'Failed to update row' });
+    }
+  };
+
+  const handleDeleteRow = async (tableName, rowId) => {
+    if (deleteConfirmText !== 'DELETE') return;
+    try {
+      await adminAPI.deleteTableRow(tableName, rowId);
+      setAdminToast({ type: 'success', message: 'Row deleted' });
+      setDeleteConfirm(null);
+      setDeleteConfirmText('');
+      loadTableData(tableName, tableData.pagination.page);
+    } catch (err) {
+      setAdminToast({ type: 'error', message: err.message || 'Failed to delete row' });
+    }
+  };
+
+  const handleExport = async (type) => {
+    try {
+      await adminAPI.downloadExport({ type, ...adminShiftsFilters });
+      setAdminToast({ type: 'success', message: 'Export downloaded' });
+    } catch (err) {
+      setAdminToast({ type: 'error', message: 'Export failed' });
+    }
+  };
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -178,15 +414,25 @@ function TimeClock() {
     return diffHours > 0 ? diffHours.toFixed(2) : '0.00';
   };
 
-  const handleClockIn = () => {
-    const newBlock = {
-      id: Date.now(),
-      startTime: getStartTime(),
-      endTime: '',
-      tasks: ''
-    };
-    setCurrentBlock(newBlock);
-    setCurrentTasks(['']);
+  const handleClockIn = async () => {
+    try {
+      const clockInTime = getStartTime();
+      // Create pending shift on server
+      const shift = await shiftsAPI.clockIn(currentDate, clockInTime);
+      setPendingShiftId(shift.id);
+
+      const newBlock = {
+        id: Date.now(),
+        startTime: clockInTime,
+        endTime: '',
+        tasks: ''
+      };
+      setCurrentBlock(newBlock);
+      setCurrentTasks(['']);
+    } catch (err) {
+      console.error('Failed to clock in:', err);
+      alert('Failed to start shift: ' + err.message);
+    }
   };
 
   // Join tasks array into a string, filtering empty entries
@@ -194,7 +440,7 @@ function TimeClock() {
     return tasksArray.filter(t => t.trim()).join(' • ');
   };
 
-  const handleAdvanceBlock = () => {
+  const handleAdvanceBlock = async () => {
     if (!currentBlock || !currentBlock.endTime) return;
 
     // Join tasks before completing
@@ -206,7 +452,28 @@ function TimeClock() {
     // Trigger swipe animation
     setSwipingBlockId(currentBlock.id);
 
-    setTimeout(() => {
+    setTimeout(async () => {
+      // Save block to server if we have a pending shift
+      if (pendingShiftId) {
+        try {
+          setAutoSaveStatus('saving');
+          const savedBlock = await shiftsAPI.addBlock(pendingShiftId, {
+            startTime: completedBlock.startTime,
+            endTime: completedBlock.endTime,
+            tasks: completedBlock.tasks,
+            isBreak: completedBlock.isBreak || false
+          });
+          // Update local block with server ID
+          completedBlock.serverId = savedBlock.id;
+          setAutoSaveStatus('saved');
+          setTimeout(() => setAutoSaveStatus('idle'), 2000);
+        } catch (err) {
+          console.error('Failed to save block:', err);
+          setAutoSaveStatus('error');
+          setTimeout(() => setAutoSaveStatus('idle'), 3000);
+        }
+      }
+
       // Move current block to completed
       setCompletedBlocks([...completedBlocks, completedBlock]);
 
@@ -224,7 +491,7 @@ function TimeClock() {
     }, 400);
   };
 
-  const handleBreak = () => {
+  const handleBreak = async () => {
     if (!currentBlock) return;
 
     // Break starts where current block ends (or use current block's end time if set)
@@ -244,8 +511,25 @@ function TimeClock() {
 
     // Complete current block first if it has content
     const joinedTasks = joinTasks(currentTasks);
+    let updatedBlocks = [...completedBlocks];
     if (currentBlock.startTime && joinedTasks) {
-      setCompletedBlocks([...completedBlocks, { ...currentBlock, tasks: joinedTasks, endTime: breakStartTime }]);
+      const workBlock = { ...currentBlock, tasks: joinedTasks, endTime: breakStartTime };
+      // Save work block to server if we have a pending shift
+      if (pendingShiftId) {
+        try {
+          const savedBlock = await shiftsAPI.addBlock(pendingShiftId, {
+            startTime: workBlock.startTime,
+            endTime: workBlock.endTime,
+            tasks: workBlock.tasks,
+            isBreak: false
+          });
+          workBlock.serverId = savedBlock.id;
+        } catch (err) {
+          console.error('Failed to save work block:', err);
+        }
+      }
+      updatedBlocks = [...completedBlocks, workBlock];
+      setCompletedBlocks(updatedBlocks);
     }
 
     // Create break block and immediately complete it
@@ -259,7 +543,27 @@ function TimeClock() {
 
     setSwipingBlockId(breakBlock.id);
 
-    setTimeout(() => {
+    setTimeout(async () => {
+      // Save break block to server
+      if (pendingShiftId) {
+        try {
+          setAutoSaveStatus('saving');
+          const savedBreak = await shiftsAPI.addBlock(pendingShiftId, {
+            startTime: breakBlock.startTime,
+            endTime: breakBlock.endTime,
+            tasks: breakBlock.tasks,
+            isBreak: true
+          });
+          breakBlock.serverId = savedBreak.id;
+          setAutoSaveStatus('saved');
+          setTimeout(() => setAutoSaveStatus('idle'), 2000);
+        } catch (err) {
+          console.error('Failed to save break:', err);
+          setAutoSaveStatus('error');
+          setTimeout(() => setAutoSaveStatus('idle'), 3000);
+        }
+      }
+
       setCompletedBlocks(prev => [...prev, breakBlock]);
 
       // Create new current block starting after break
@@ -599,6 +903,8 @@ function TimeClock() {
     setCurrentTasks(['']);
     setEditingBlock(null);
     setEditingTasks(['']);
+    setPendingShiftId(null);
+    setAutoSaveStatus('idle');
   };
 
   const calculateTotalHours = () => {
@@ -644,14 +950,27 @@ function TimeClock() {
     setShowPreviewModal(true);
   };
 
-  // Actually save the shift after confirmation
+  // Actually save the shift after confirmation (Clock Out)
   const confirmSave = async () => {
     if (!previewShiftData) return;
 
     setSaving(true);
     try {
-      const newShift = await shiftsAPI.create(previewShiftData);
-      setShifts([newShift, ...shifts]);
+      let completedShift;
+
+      if (pendingShiftId) {
+        // Complete the pending shift (clock out)
+        completedShift = await shiftsAPI.clockOut(
+          pendingShiftId,
+          previewShiftData.clockOutTime,
+          previewShiftData.totalHours
+        );
+      } else {
+        // Fallback: create new shift (shouldn't happen with new flow)
+        completedShift = await shiftsAPI.create(previewShiftData);
+      }
+
+      setShifts([completedShift, ...shifts]);
 
       // Show toast with preview
       setToast({
@@ -675,43 +994,153 @@ function TimeClock() {
     setPreviewShiftData(null);
   };
 
+  // Recovery modal handlers
+  const handleResumeRecovery = () => {
+    if (!recoveryShift) return;
+
+    // Set the pending shift ID
+    setPendingShiftId(recoveryShift.id);
+    setCurrentDate(recoveryShift.date);
+
+    // Load saved blocks into completed blocks
+    const savedBlocks = recoveryShift.timeBlocks || [];
+    setCompletedBlocks(savedBlocks.map(block => ({
+      ...block,
+      serverId: block.id
+    })));
+
+    // Create a new current block starting from last block's end time
+    if (savedBlocks.length > 0) {
+      const lastBlock = savedBlocks[savedBlocks.length - 1];
+      setCurrentBlock({
+        id: Date.now(),
+        startTime: lastBlock.endTime || lastBlock.startTime,
+        endTime: '',
+        tasks: ''
+      });
+    } else {
+      setCurrentBlock({
+        id: Date.now(),
+        startTime: recoveryShift.clockInTime || getActualTime(),
+        endTime: '',
+        tasks: ''
+      });
+    }
+    setCurrentTasks(['']);
+    setShowRecoveryModal(false);
+    setRecoveryShift(null);
+  };
+
+  const handleDiscardRecovery = () => {
+    // Show confirmation before discarding
+    setShowDiscardConfirm(true);
+  };
+
+  const confirmDiscardRecovery = async () => {
+    if (!recoveryShift) return;
+
+    try {
+      await shiftsAPI.discard(recoveryShift.id);
+      setShowRecoveryModal(false);
+      setShowDiscardConfirm(false);
+      setRecoveryShift(null);
+    } catch (err) {
+      console.error('Failed to discard shift:', err);
+      alert('Failed to discard shift: ' + err.message);
+    }
+  };
+
+  const cancelDiscardRecovery = () => {
+    setShowDiscardConfirm(false);
+  };
+
+  // Clock out the recovered shift as-is (user forgot to clock out)
+  const handleClockOutRecovery = async () => {
+    if (!recoveryShift || !recoveryShift.timeBlocks || recoveryShift.timeBlocks.length === 0) {
+      alert('Cannot clock out - no time blocks saved');
+      return;
+    }
+
+    try {
+      // Calculate total hours from saved blocks
+      let totalHours = 0;
+      recoveryShift.timeBlocks.forEach(block => {
+        const hrs = calculateBlockHours(block.startTime, block.endTime);
+        if (hrs) totalHours += parseFloat(hrs);
+      });
+
+      // Get clock out time from last block's end time
+      const lastBlock = recoveryShift.timeBlocks[recoveryShift.timeBlocks.length - 1];
+      const clockOutTime = lastBlock.endTime;
+
+      // Complete the shift
+      const completedShift = await shiftsAPI.clockOut(
+        recoveryShift.id,
+        clockOutTime,
+        totalHours.toFixed(2)
+      );
+
+      // Add to shifts list
+      setShifts([completedShift, ...shifts]);
+
+      // Show toast
+      setToast({
+        message: 'Shift clocked out successfully!',
+        shift: completedShift
+      });
+      setTimeout(() => setToast(null), 5000);
+
+      setShowRecoveryModal(false);
+      setRecoveryShift(null);
+    } catch (err) {
+      console.error('Failed to clock out:', err);
+      alert('Failed to clock out: ' + err.message);
+    }
+  };
+
   const formatTime = (time) => {
     if (!time) return '--:--';
 
-    let timeStr = time;
+    let hour, minute;
 
     // Handle Date objects
     if (time instanceof Date) {
-      const h = time.getHours();
-      const m = time.getMinutes();
-      timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      hour = time.getHours();
+      minute = time.getMinutes();
     }
-
+    // Handle ISO timestamp strings (e.g., "2026-01-27T15:45:00.000Z")
+    else if (typeof time === 'string' && (time.includes('T') || (time.includes(' ') && time.includes('-')))) {
+      const date = new Date(time);
+      if (!isNaN(date.getTime())) {
+        hour = date.getHours();
+        minute = date.getMinutes();
+      }
+    }
     // Handle object with hours/minutes (some DB drivers return this)
-    if (typeof time === 'object' && time !== null && !Array.isArray(time)) {
+    else if (typeof time === 'object' && time !== null && !Array.isArray(time)) {
       if ('hours' in time || 'minutes' in time) {
-        const h = time.hours || 0;
-        const m = time.minutes || 0;
-        timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        hour = time.hours || 0;
+        minute = time.minutes || 0;
+      }
+    }
+    // Handle "HH:MM" or "HH:MM:SS" format strings
+    else if (typeof time === 'string') {
+      const parts = time.split(':');
+      if (parts.length >= 2) {
+        hour = parseInt(parts[0]);
+        minute = parseInt(parts[1]);
       }
     }
 
-    // Ensure it's a string
-    if (typeof timeStr !== 'string') {
+    // Validate we got valid numbers
+    if (hour === undefined || minute === undefined || isNaN(hour) || isNaN(minute)) {
       console.log('Unexpected time format:', time, typeof time);
       return '--:--';
     }
 
-    // Handle both "HH:MM" and "HH:MM:SS" formats
-    const parts = timeStr.split(':');
-    if (parts.length < 2) return '--:--';
-    const hours = parts[0];
-    const minutes = parts[1];
-    const hour = parseInt(hours);
-    if (isNaN(hour)) return '--:--';
     const ampm = hour >= 12 ? 'PM' : 'AM';
     const formattedHour = hour % 12 || 12;
-    return `${formattedHour}:${minutes} ${ampm}`;
+    return `${formattedHour}:${String(minute).padStart(2, '0')} ${ampm}`;
   };
 
   const formatDate = (dateStr) => {
@@ -993,6 +1422,84 @@ function TimeClock() {
         </div>
       )}
 
+      {/* Recovery Modal */}
+      {showRecoveryModal && recoveryShift && (
+        <div className="modal-overlay">
+          <div className="preview-modal recovery-modal">
+            <div className="modal-header">
+              <h2>Resume Previous Shift?</h2>
+            </div>
+            <div className="modal-body">
+              {showDiscardConfirm ? (
+                <div className="discard-confirm">
+                  <p className="discard-warning">Are you sure you want to discard this shift?</p>
+                  <p className="discard-subtext">This will permanently delete all {recoveryShift.timeBlocks?.length || 0} saved block(s).</p>
+                </div>
+              ) : (
+                <>
+                  <div className="recovery-info">
+                    <p>You have an unfinished shift from <strong>{formatDate(recoveryShift.date)}</strong></p>
+                    <p className="recovery-blocks-count">
+                      {recoveryShift.timeBlocks?.length || 0} time block(s) saved
+                    </p>
+                  </div>
+                  {recoveryShift.timeBlocks && recoveryShift.timeBlocks.length > 0 && (
+                    <div className="preview-blocks">
+                      <h3>Saved Blocks</h3>
+                      {recoveryShift.timeBlocks.map((block, index) => (
+                        <div key={index} className={`preview-block ${block.isBreak ? 'break-block' : ''}`}>
+                          <div className="preview-block-header">
+                            <span className="preview-block-time">
+                              {formatTime(block.startTime)} - {formatTime(block.endTime)}
+                            </span>
+                          </div>
+                          <div className="preview-block-tasks">{block.tasks}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="modal-footer recovery-footer">
+              {showDiscardConfirm ? (
+                <>
+                  <button className="btn-cancel-modal" onClick={cancelDiscardRecovery}>
+                    Go Back
+                  </button>
+                  <button className="btn-danger" onClick={confirmDiscardRecovery}>
+                    Yes, Discard
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button className="btn-cancel-modal" onClick={handleDiscardRecovery}>
+                    Discard & Start Fresh
+                  </button>
+                  {recoveryShift.timeBlocks && recoveryShift.timeBlocks.length > 0 && (
+                    <button className="btn-secondary" onClick={handleClockOutRecovery}>
+                      Clock Out Now
+                    </button>
+                  )}
+                  <button className="btn-confirm-modal" onClick={handleResumeRecovery}>
+                    Resume Shift
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Auto-save indicator */}
+      {autoSaveStatus !== 'idle' && (
+        <div className={`auto-save-indicator ${autoSaveStatus}`}>
+          {autoSaveStatus === 'saving' && 'Saving...'}
+          {autoSaveStatus === 'saved' && 'Saved'}
+          {autoSaveStatus === 'error' && 'Save failed'}
+        </div>
+      )}
+
       <header className="header">
         <div className="header-top">
           <h1>Time Clock</h1>
@@ -1086,6 +1593,14 @@ function TimeClock() {
 
       {/* Tab Navigation */}
       <div className="tab-nav">
+        {isAdmin && (
+          <button
+            className={`tab-btn admin-tab ${activeTab === 'admin' ? 'active' : ''}`}
+            onClick={() => setActiveTab('admin')}
+          >
+            Admin Panel
+          </button>
+        )}
         <button
           className={`tab-btn ${activeTab === 'today' ? 'active' : ''}`}
           onClick={() => setActiveTab('today')}
@@ -1098,14 +1613,6 @@ function TimeClock() {
         >
           Shift History
         </button>
-        {isAdmin && (
-          <button
-            className={`tab-btn admin-tab ${activeTab === 'admin' ? 'active' : ''}`}
-            onClick={() => setActiveTab('admin')}
-          >
-            Admin View
-          </button>
-        )}
       </div>
 
       {activeTab === 'today' ? (
@@ -1356,7 +1863,7 @@ function TimeClock() {
                 onClick={previewShift}
                 disabled={(completedBlocks.length === 0 && !currentBlock) || saving}
               >
-                {saving ? 'Saving...' : 'Save Shift'}
+                {saving ? 'Saving...' : 'Clock Out'}
               </button>
             </div>
           </section>
@@ -1434,21 +1941,23 @@ function TimeClock() {
                 {shifts.map((shift) => {
                   const shiftId = shift._id || shift.id;
                   const isExpanded = expandedShifts.has(shiftId);
+                  const isPending = shift.status === 'pending';
                   return (
-                    <div key={shiftId} className={`history-item ${isExpanded ? 'expanded' : ''}`}>
+                    <div key={shiftId} className={`history-item ${isExpanded ? 'expanded' : ''} ${isPending ? 'pending-shift' : ''}`}>
                       <div className="history-header">
                         <div
                           className="history-header-left"
                           onClick={() => toggleShiftExpanded(shiftId)}
                         >
                           <span className="expand-icon">{isExpanded ? '▼' : '▶'}</span>
+                          {isPending && <span className="status-badge pending">In Progress</span>}
                           <span className="history-date">{formatDate(shift.date)}</span>
                           <span className="history-times-inline">
-                            {formatTime(shift.clockInTime)} - {formatTime(shift.clockOutTime)}
+                            {formatTime(shift.clockInTime)} - {isPending ? 'Active' : formatTime(shift.clockOutTime)}
                           </span>
                         </div>
                         <div className="history-header-right">
-                          <span className="history-hours">{shift.totalHours} hrs</span>
+                          <span className="history-hours">{isPending ? '--' : shift.totalHours} hrs</span>
                           <button
                             type="button"
                             className="btn-delete-shift"
@@ -1492,62 +2001,598 @@ function TimeClock() {
           </section>
         </main>
       ) : (
-        /* Admin View Tab */
-        <main className="history-tab admin-view">
-          <section className="shift-history-full">
-            <h2>All Users' Shifts</h2>
-            {adminLoading ? (
-              <p className="loading-text">Loading all shifts...</p>
-            ) : adminShifts.length === 0 ? (
-              <p className="empty-text">No shifts from any users yet</p>
-            ) : (
-              <div className="history-list">
-                {adminShifts.map((shift) => {
-                  const shiftId = shift._id || shift.id;
-                  const isExpanded = expandedShifts.has(shiftId);
-                  return (
-                    <div key={shiftId} className={`history-item ${isExpanded ? 'expanded' : ''}`}>
-                      <div className="history-header">
-                        <div
-                          className="history-header-left"
-                          onClick={() => toggleShiftExpanded(shiftId)}
-                        >
-                          <span className="expand-icon">{isExpanded ? '▼' : '▶'}</span>
-                          <span className="admin-user-name">{shift.userName || 'Unknown'}</span>
-                          <span className="history-date">{formatDate(shift.date)}</span>
-                          <span className="history-times-inline">
-                            {formatTime(shift.clockInTime)} - {formatTime(shift.clockOutTime)}
-                          </span>
-                        </div>
-                        <div className="history-header-right">
-                          <span className="history-hours">{shift.totalHours} hrs</span>
-                        </div>
+        /* Admin Panel */
+        <main className="admin-panel">
+          {/* Admin Toast */}
+          {adminToast && (
+            <div className={`admin-toast ${adminToast.type}`}>
+              {adminToast.message}
+              <button onClick={() => setAdminToast(null)}>&times;</button>
+            </div>
+          )}
+
+          {/* Delete Confirmation Modal */}
+          {deleteConfirm && (
+            <div className="modal-overlay" onClick={() => { setDeleteConfirm(null); setDeleteConfirmText(''); }}>
+              <div className="preview-modal delete-modal" onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h2>Confirm Delete</h2>
+                  <button className="modal-close" onClick={() => { setDeleteConfirm(null); setDeleteConfirmText(''); }}>&times;</button>
+                </div>
+                <div className="modal-body">
+                  <p className="delete-warning">This action cannot be undone. Type <strong>DELETE</strong> to confirm.</p>
+                  <input
+                    type="text"
+                    value={deleteConfirmText}
+                    onChange={e => setDeleteConfirmText(e.target.value)}
+                    placeholder="Type DELETE to confirm"
+                    className="delete-confirm-input"
+                  />
+                </div>
+                <div className="modal-footer">
+                  <button className="btn-cancel-modal" onClick={() => { setDeleteConfirm(null); setDeleteConfirmText(''); }}>Cancel</button>
+                  <button
+                    className="btn-delete-confirm"
+                    disabled={deleteConfirmText !== 'DELETE'}
+                    onClick={() => {
+                      if (deleteConfirm.type === 'user') handleDeactivateUser(deleteConfirm.id);
+                      else if (deleteConfirm.type === 'shift') handleDeleteShift(deleteConfirm.id);
+                      else if (deleteConfirm.type === 'row') handleDeleteRow(deleteConfirm.table, deleteConfirm.id);
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Edit User Modal */}
+          {editingUser && (
+            <div className="modal-overlay" onClick={() => setEditingUser(null)}>
+              <div className="preview-modal edit-modal" onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h2>Edit User</h2>
+                  <button className="modal-close" onClick={() => setEditingUser(null)}>&times;</button>
+                </div>
+                <div className="modal-body">
+                  <div className="form-field">
+                    <label>Name</label>
+                    <input type="text" value={editingUser.name} onChange={e => setEditingUser({...editingUser, name: e.target.value})} />
+                  </div>
+                  <div className="form-field">
+                    <label>Email</label>
+                    <input type="email" value={editingUser.email} onChange={e => setEditingUser({...editingUser, email: e.target.value})} />
+                  </div>
+                  <div className="form-field">
+                    <label>Status</label>
+                    <select value={editingUser.status} onChange={e => setEditingUser({...editingUser, status: e.target.value})}>
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                  </div>
+                  <div className="form-field">
+                    <label>Role</label>
+                    <select value={editingUser.role} onChange={e => setEditingUser({...editingUser, role: e.target.value})}>
+                      <option value="user">User</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="modal-footer">
+                  <button className="btn-cancel-modal" onClick={() => setEditingUser(null)}>Cancel</button>
+                  <button className="btn-confirm-modal" onClick={() => handleUpdateUser(editingUser.id, editingUser)}>Save Changes</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Create User Modal */}
+          {creatingUser && (
+            <div className="modal-overlay" onClick={() => setCreatingUser(false)}>
+              <div className="preview-modal edit-modal" onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h2>Create User</h2>
+                  <button className="modal-close" onClick={() => setCreatingUser(false)}>&times;</button>
+                </div>
+                <div className="modal-body">
+                  <div className="form-field">
+                    <label>Name *</label>
+                    <input type="text" value={newUserData.name} onChange={e => setNewUserData({...newUserData, name: e.target.value})} placeholder="Full name" />
+                  </div>
+                  <div className="form-field">
+                    <label>Email *</label>
+                    <input type="email" value={newUserData.email} onChange={e => setNewUserData({...newUserData, email: e.target.value})} placeholder="email@example.com" />
+                  </div>
+                  <div className="form-field">
+                    <label>Password *</label>
+                    <input type="password" value={newUserData.password} onChange={e => setNewUserData({...newUserData, password: e.target.value})} placeholder="Min 6 characters" />
+                  </div>
+                  <div className="form-field">
+                    <label>Role</label>
+                    <select value={newUserData.role} onChange={e => setNewUserData({...newUserData, role: e.target.value})}>
+                      <option value="user">User</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </div>
+                  <div className="form-field">
+                    <label>Status</label>
+                    <select value={newUserData.status} onChange={e => setNewUserData({...newUserData, status: e.target.value})}>
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="modal-footer">
+                  <button className="btn-cancel-modal" onClick={() => { setCreatingUser(false); setNewUserData({ email: '', password: '', name: '', role: 'user', status: 'active' }); }}>Cancel</button>
+                  <button className="btn-confirm-modal" onClick={handleCreateUser}>Create User</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Edit Shift Modal */}
+          {editingShift && (
+            <div className="modal-overlay" onClick={() => setEditingShift(null)}>
+              <div className="preview-modal edit-modal" onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h2>Edit Shift</h2>
+                  <button className="modal-close" onClick={() => setEditingShift(null)}>&times;</button>
+                </div>
+                <div className="modal-body">
+                  <div className="form-field">
+                    <label>Date</label>
+                    <input type="date" value={editingShift.date?.split('T')[0] || editingShift.date} onChange={e => setEditingShift({...editingShift, date: e.target.value})} />
+                  </div>
+                  <div className="form-field">
+                    <label>Clock In</label>
+                    <input type="time" value={editingShift.clock_in_time?.substring(0,5) || ''} onChange={e => setEditingShift({...editingShift, clockInTime: e.target.value})} />
+                  </div>
+                  <div className="form-field">
+                    <label>Clock Out</label>
+                    <input type="time" value={editingShift.clock_out_time?.substring(0,5) || ''} onChange={e => setEditingShift({...editingShift, clockOutTime: e.target.value})} />
+                  </div>
+                  <div className="form-field">
+                    <label>Total Hours</label>
+                    <input type="number" step="0.01" value={editingShift.total_hours || ''} onChange={e => setEditingShift({...editingShift, totalHours: e.target.value})} />
+                  </div>
+                </div>
+                <div className="modal-footer">
+                  <button className="btn-cancel-modal" onClick={() => setEditingShift(null)}>Cancel</button>
+                  <button className="btn-confirm-modal" onClick={() => handleUpdateShift(editingShift.id, editingShift)}>Save Changes</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Edit Row Modal */}
+          {editingRow && (
+            <div className="modal-overlay" onClick={() => setEditingRow(null)}>
+              <div className="preview-modal edit-modal" onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h2>Edit Row</h2>
+                  <button className="modal-close" onClick={() => setEditingRow(null)}>&times;</button>
+                </div>
+                <div className="modal-body">
+                  {tableData.schema?.filter(col => !col.isProtected && !col.isRedacted).map(col => (
+                    <div key={col.column_name} className="form-field">
+                      <label>{col.column_name}</label>
+                      <input
+                        type={col.data_type.includes('int') ? 'number' : 'text'}
+                        value={editingRow[col.column_name] ?? ''}
+                        onChange={e => setEditingRow({...editingRow, [col.column_name]: e.target.value})}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="modal-footer">
+                  <button className="btn-cancel-modal" onClick={() => setEditingRow(null)}>Cancel</button>
+                  <button className="btn-confirm-modal" onClick={() => handleUpdateRow(selectedTable, editingRow.id, editingRow)}>Save Changes</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Admin Sub-Navigation */}
+          <div className="admin-sub-nav">
+            <button className={`admin-sub-tab ${adminSubTab === 'dashboard' ? 'active' : ''}`} onClick={() => setAdminSubTab('dashboard')}>Dashboard</button>
+            <button className={`admin-sub-tab ${adminSubTab === 'users' ? 'active' : ''}`} onClick={() => setAdminSubTab('users')}>Users</button>
+            <button className={`admin-sub-tab ${adminSubTab === 'shifts' ? 'active' : ''}`} onClick={() => setAdminSubTab('shifts')}>Shifts</button>
+            <button className={`admin-sub-tab ${adminSubTab === 'reports' ? 'active' : ''}`} onClick={() => setAdminSubTab('reports')}>Reports</button>
+            <button className={`admin-sub-tab ${adminSubTab === 'database' ? 'active' : ''}`} onClick={() => setAdminSubTab('database')}>Data Browser</button>
+          </div>
+
+          {/* Dashboard Sub-Tab */}
+          {adminSubTab === 'dashboard' && (
+            <div className="admin-content">
+              {adminLoading ? (
+                <p className="loading-text">Loading dashboard...</p>
+              ) : dashboardData ? (
+                <>
+                  <div className="stats-grid">
+                    <div className="stat-card">
+                      <div className="stat-value">{dashboardData.totalUsers}</div>
+                      <div className="stat-label">Total Users</div>
+                    </div>
+                    <div className="stat-card">
+                      <div className="stat-value">{dashboardData.activeUsers}</div>
+                      <div className="stat-label">Active This Week</div>
+                    </div>
+                    <div className="stat-card">
+                      <div className="stat-value">{dashboardData.hoursToday?.toFixed(1) || 0}</div>
+                      <div className="stat-label">Hours Today</div>
+                    </div>
+                    <div className="stat-card">
+                      <div className="stat-value">{dashboardData.hoursThisWeek?.toFixed(1) || 0}</div>
+                      <div className="stat-label">Hours This Week</div>
+                    </div>
+                    <div className="stat-card">
+                      <div className="stat-value">{dashboardData.hoursThisMonth?.toFixed(1) || 0}</div>
+                      <div className="stat-label">Hours This Month</div>
+                    </div>
+                  </div>
+
+                  <div className="dashboard-sections">
+                    <div className="dashboard-section">
+                      <h3>Top Employees This Week</h3>
+                      <div className="top-employees-list">
+                        {dashboardData.topEmployees?.slice(0, 5).map((emp, i) => (
+                          <div key={emp.id} className="top-employee">
+                            <span className="rank">#{i + 1}</span>
+                            <span className="name">{emp.name}</span>
+                            <span className="hours">{emp.hours?.toFixed(1) || 0} hrs</span>
+                          </div>
+                        ))}
                       </div>
-                      {isExpanded && shift.timeBlocks && shift.timeBlocks.length > 0 && (
-                        <div className="history-tasks">
-                          {shift.timeBlocks.map((block, i) => (
-                            <div key={i} className={`history-task ${block.isBreak ? 'break-task' : ''}`}>
-                              <span className="task-time">
-                                {formatTime(block.startTime)} - {formatTime(block.endTime)}
-                              </span>
-                              <span className="task-text">
-                                {block.tasks.split(' • ').map((task, j) => (
-                                  <span key={j} className="task-line-inline">{task}</span>
-                                ))}
-                              </span>
-                              {calculateBlockHours(block.startTime, block.endTime) && (
-                                <span className="task-hours">{calculateBlockHours(block.startTime, block.endTime)}h</span>
+                    </div>
+
+                    <div className="dashboard-section">
+                      <h3>Recent Activity</h3>
+                      <div className="activity-list">
+                        {dashboardData.recentActivity?.slice(0, 10).map((activity, i) => (
+                          <div key={i} className="activity-item">
+                            <span className="activity-action">{activity.action}</span>
+                            <span className="activity-target">{activity.target_type} #{activity.target_id}</span>
+                            <span className="activity-time">{new Date(activity.created_at).toLocaleString()}</span>
+                          </div>
+                        ))}
+                        {(!dashboardData.recentActivity || dashboardData.recentActivity.length === 0) && (
+                          <p className="empty-text">No recent admin activity</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <button className="btn-confirm-modal" onClick={loadDashboard}>Load Dashboard</button>
+              )}
+            </div>
+          )}
+
+          {/* Users Sub-Tab */}
+          {adminSubTab === 'users' && (
+            <div className="admin-content">
+              <div className="admin-header-bar">
+                <button className="btn-create" onClick={() => setCreatingUser(true)}>+ Create User</button>
+              </div>
+              {adminUsersLoading ? (
+                <p className="loading-text">Loading users...</p>
+              ) : (
+                <>
+                  <div className="admin-table-container">
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>ID</th>
+                          <th>Name</th>
+                          <th>Email</th>
+                          <th>Role</th>
+                          <th>Status</th>
+                          <th>Created</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminUsers.map(u => (
+                          <tr key={u.id} className={u.status === 'inactive' ? 'inactive-row' : ''}>
+                            <td>{u.id}</td>
+                            <td>{u.name}</td>
+                            <td>{u.email}</td>
+                            <td><span className={`role-badge ${u.role}`}>{u.role}</span></td>
+                            <td><span className={`status-badge ${u.status}`}>{u.status}</span></td>
+                            <td>{new Date(u.created_at).toLocaleDateString()}</td>
+                            <td className="action-cell">
+                              <button className="btn-edit-small" onClick={() => setEditingUser({...u})}>Edit</button>
+                              {u.id !== user.id && (
+                                <button className="btn-delete-small" onClick={() => setDeleteConfirm({ type: 'user', id: u.id })}>Deactivate</button>
                               )}
-                            </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {adminUsersPagination.totalPages > 1 && (
+                    <div className="pagination">
+                      <button disabled={adminUsersPagination.page <= 1} onClick={() => loadAdminUsers(adminUsersPagination.page - 1)}>Prev</button>
+                      <span>Page {adminUsersPagination.page} of {adminUsersPagination.totalPages}</span>
+                      <button disabled={adminUsersPagination.page >= adminUsersPagination.totalPages} onClick={() => loadAdminUsers(adminUsersPagination.page + 1)}>Next</button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Shifts Sub-Tab */}
+          {adminSubTab === 'shifts' && (
+            viewingShift ? (
+              /* Full Page Shift Details */
+              <div className="shift-detail-page">
+                <div className="breadcrumb-nav">
+                  <button className="breadcrumb-link" onClick={() => setViewingShift(null)}>
+                    ← Back to Shifts
+                  </button>
+                  <span className="breadcrumb-separator">/</span>
+                  <span className="breadcrumb-current">Shift #{viewingShift.id}</span>
+                </div>
+
+                <div className="shift-detail-two-column">
+                {/* Column 1: Shift Details */}
+                <div className="shift-detail-card">
+                  <div className="shift-detail-card-header">
+                    <h2>Shift Details</h2>
+                    <div className="shift-detail-actions">
+                      <button className="btn-edit-small" onClick={() => { setEditingShift({...viewingShift}); }}>Edit</button>
+                      <button className="btn-delete-small" onClick={() => setDeleteConfirm({ type: 'shift', id: viewingShift.id })}>Delete</button>
+                    </div>
+                  </div>
+
+                  <div className="shift-details-list">
+                    <div className="detail-row">
+                      <span className="detail-label">Employee</span>
+                      <span className="detail-value">{viewingShift.user_name}</span>
+                    </div>
+                    <div className="detail-row">
+                      <span className="detail-label">Email</span>
+                      <span className="detail-value">{viewingShift.user_email}</span>
+                    </div>
+                    <div className="detail-row">
+                      <span className="detail-label">Date</span>
+                      <span className="detail-value">{formatDate(viewingShift.date)}</span>
+                    </div>
+                    <div className="detail-row">
+                      <span className="detail-label">Clock In</span>
+                      <span className="detail-value">{formatTime(viewingShift.clock_in_time)}</span>
+                    </div>
+                    <div className="detail-row">
+                      <span className="detail-label">Clock Out</span>
+                      <span className="detail-value">{formatTime(viewingShift.clock_out_time) || '-'}</span>
+                    </div>
+                    <div className="detail-row">
+                      <span className="detail-label">Total Hours</span>
+                      <span className="detail-value highlight">{viewingShift.total_hours || '0'} hrs</span>
+                    </div>
+                    <div className="detail-row">
+                      <span className="detail-label">Status</span>
+                      <span className={`status-badge ${viewingShift.status}`}>{viewingShift.status}</span>
+                    </div>
+                    <div className="detail-row">
+                      <span className="detail-label">Shift ID</span>
+                      <span className="detail-value">#{viewingShift.id}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Column 2: Time Blocks */}
+                <div className="time-blocks-card">
+                  <h3>Time Blocks ({viewingShift.timeBlocks?.length || 0})</h3>
+                  {viewingShift.timeBlocks && viewingShift.timeBlocks.length > 0 ? (
+                    <div className="time-blocks-stack">
+                      {viewingShift.timeBlocks.map((block, idx) => (
+                        <div key={block.id || idx} className={`time-block-row ${block.is_break ? 'break' : ''}`}>
+                          <span className="block-time-col">{formatTime(block.start_time)} → {formatTime(block.end_time) || '...'}</span>
+                          {block.is_break ? (
+                            <span className="block-task-col break-text">Break</span>
+                          ) : (
+                            <span className="block-task-col">{block.tasks || '-'}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="no-time-blocks">No time blocks recorded for this shift</p>
+                  )}
+                </div>
+              </div>
+            </div>
+            ) : (
+              /* Shifts List */
+              <div className="admin-content">
+                <div className="filters-bar">
+                  <input
+                    type="date"
+                    placeholder="Start Date"
+                    value={adminShiftsFilters.startDate}
+                    onChange={e => setAdminShiftsFilters({...adminShiftsFilters, startDate: e.target.value})}
+                  />
+                  <input
+                    type="date"
+                    placeholder="End Date"
+                    value={adminShiftsFilters.endDate}
+                    onChange={e => setAdminShiftsFilters({...adminShiftsFilters, endDate: e.target.value})}
+                  />
+                  <button className="btn-filter" onClick={() => loadAdminShifts(1)}>Apply Filters</button>
+                  <button className="btn-clear-filter" onClick={() => { setAdminShiftsFilters({ userId: '', startDate: '', endDate: '' }); loadAdminShifts(1); }}>Clear</button>
+                </div>
+
+                {adminLoading ? (
+                  <p className="loading-text">Loading shifts...</p>
+                ) : (
+                  <>
+                    <div className="admin-table-container">
+                      <table className="admin-table">
+                        <thead>
+                          <tr>
+                            <th>ID</th>
+                            <th>User</th>
+                            <th>Date</th>
+                            <th>Clock In</th>
+                            <th>Clock Out</th>
+                            <th>Hours</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {adminShifts.map(s => (
+                            <tr
+                              key={s.id}
+                              className="clickable-row"
+                              onClick={() => viewShiftDetails(s.id)}
+                            >
+                              <td>{s.id}</td>
+                              <td>{s.userName || s.user_name}</td>
+                              <td>{formatDate(s.date)}</td>
+                              <td>{formatTime(s.clock_in_time)}</td>
+                              <td>{formatTime(s.clock_out_time)}</td>
+                              <td>{s.total_hours}</td>
+                              <td><span className={`status-badge ${s.status}`}>{s.status}</span></td>
+                              <td className="action-cell" onClick={e => e.stopPropagation()}>
+                                <button className="btn-edit-small" onClick={() => setEditingShift({...s})}>Edit</button>
+                                <button className="btn-delete-small" onClick={() => setDeleteConfirm({ type: 'shift', id: s.id })}>Delete</button>
+                              </td>
+                            </tr>
                           ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {adminShiftsPagination.totalPages > 1 && (
+                      <div className="pagination">
+                        <button disabled={adminShiftsPagination.page <= 1} onClick={() => loadAdminShifts(adminShiftsPagination.page - 1)}>Prev</button>
+                        <span>Page {adminShiftsPagination.page} of {adminShiftsPagination.totalPages}</span>
+                        <button disabled={adminShiftsPagination.page >= adminShiftsPagination.totalPages} onClick={() => loadAdminShifts(adminShiftsPagination.page + 1)}>Next</button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )
+          )}
+
+          {/* Reports Sub-Tab */}
+          {adminSubTab === 'reports' && (
+            <div className="admin-content">
+              <div className="reports-section">
+                <h3>Export Data</h3>
+                <div className="filters-bar">
+                  <input
+                    type="date"
+                    placeholder="Start Date"
+                    value={adminShiftsFilters.startDate}
+                    onChange={e => setAdminShiftsFilters({...adminShiftsFilters, startDate: e.target.value})}
+                  />
+                  <input
+                    type="date"
+                    placeholder="End Date"
+                    value={adminShiftsFilters.endDate}
+                    onChange={e => setAdminShiftsFilters({...adminShiftsFilters, endDate: e.target.value})}
+                  />
+                </div>
+                <div className="export-buttons">
+                  <button className="btn-export" onClick={() => handleExport('shifts')}>Export Shifts (CSV)</button>
+                  <button className="btn-export" onClick={() => handleExport('users')}>Export Users (CSV)</button>
+                  <button className="btn-export" onClick={() => handleExport('hours')}>Export Hours Summary (CSV)</button>
+                  <button className="btn-export" onClick={() => handleExport('timeblocks')}>Export Time Blocks (CSV)</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Database Browser Sub-Tab */}
+          {adminSubTab === 'database' && (
+            <div className="admin-content">
+              <div className="db-browser">
+                <div className="db-sidebar">
+                  <h3>Tables</h3>
+                  {tableLoading && !dbTables.length ? (
+                    <p className="loading-text">Loading tables...</p>
+                  ) : (
+                    <ul className="table-list">
+                      {dbTables.map(t => (
+                        <li
+                          key={t.name}
+                          className={`table-item ${selectedTable === t.name ? 'selected' : ''} ${!t.writable ? 'readonly' : ''}`}
+                          onClick={() => loadTableData(t.name)}
+                        >
+                          <span className="table-name">{t.name}</span>
+                          <span className="table-count">{t.rowCount} rows</span>
+                          {!t.writable && <span className="readonly-badge">Read-only</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div className="db-content">
+                  {!selectedTable ? (
+                    <p className="empty-text">Select a table to browse data</p>
+                  ) : tableLoading ? (
+                    <p className="loading-text">Loading data...</p>
+                  ) : (
+                    <>
+                      <h3>{selectedTable} <span className="table-info">({tableData.pagination?.total || 0} rows)</span></h3>
+                      <div className="admin-table-container">
+                        <table className="admin-table db-table">
+                          <thead>
+                            <tr>
+                              {tableData.schema?.map(col => (
+                                <th key={col.column_name} className={col.isRedacted ? 'redacted' : ''}>
+                                  {col.column_name}
+                                  {col.isProtected && <span className="protected-icon" title="Protected">*</span>}
+                                </th>
+                              ))}
+                              {tableData.config?.writable && <th>Actions</th>}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tableData.rows?.map(row => (
+                              <tr key={row.id}>
+                                {tableData.schema?.map(col => (
+                                  <td key={col.column_name} className={col.isRedacted ? 'redacted-cell' : ''}>
+                                    {col.isRedacted ? '[REDACTED]' : (
+                                      typeof row[col.column_name] === 'object'
+                                        ? JSON.stringify(row[col.column_name])
+                                        : String(row[col.column_name] ?? '')
+                                    )}
+                                  </td>
+                                ))}
+                                {tableData.config?.writable && (
+                                  <td className="action-cell">
+                                    <button className="btn-edit-small" onClick={() => setEditingRow({...row})}>Edit</button>
+                                    {tableData.config?.deleteAllowed && (
+                                      <button className="btn-delete-small" onClick={() => setDeleteConfirm({ type: 'row', table: selectedTable, id: row.id })}>Delete</button>
+                                    )}
+                                  </td>
+                                )}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {tableData.pagination?.totalPages > 1 && (
+                        <div className="pagination">
+                          <button disabled={tableData.pagination.page <= 1} onClick={() => loadTableData(selectedTable, tableData.pagination.page - 1)}>Prev</button>
+                          <span>Page {tableData.pagination.page} of {tableData.pagination.totalPages}</span>
+                          <button disabled={tableData.pagination.page >= tableData.pagination.totalPages} onClick={() => loadTableData(selectedTable, tableData.pagination.page + 1)}>Next</button>
                         </div>
                       )}
-                    </div>
-                  );
-                })}
+                    </>
+                  )}
+                </div>
               </div>
-            )}
-          </section>
+            </div>
+          )}
         </main>
       )}
     </div>
