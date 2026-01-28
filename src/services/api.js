@@ -63,7 +63,7 @@ const normalizeTime = (value) => {
   if (!value) return null;
 
   // If it's an ISO timestamp (contains T or has date part)
-  if (typeof value === 'string' && (value.includes('T') || value.includes(' ') && value.includes('-'))) {
+  if (typeof value === 'string' && (value.includes('T') || (value.includes(' ') && value.includes('-')))) {
     const date = new Date(value);
     if (!isNaN(date.getTime())) {
       const h = String(date.getHours()).padStart(2, '0');
