@@ -382,4 +382,80 @@ export const adminAPI = {
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
   },
+
+  // Pending Approval
+  getPendingShifts: (params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    return request(`/admin/shifts/pending${queryString ? `?${queryString}` : ''}`);
+  },
+
+  approveShift: (id) =>
+    request(`/admin/shifts/${id}/approve`, {
+      method: 'POST',
+    }),
+
+  rejectShift: (id, reason) =>
+    request(`/admin/shifts/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+
+  markShiftPaid: (id) =>
+    request(`/admin/shifts/${id}/mark-paid`, {
+      method: 'POST',
+    }),
+
+  batchApproveShifts: (shiftIds) =>
+    request('/admin/shifts/batch-approve', {
+      method: 'POST',
+      body: JSON.stringify({ shiftIds }),
+    }),
+
+  batchMarkPaid: (shiftIds) =>
+    request('/admin/shifts/batch-paid', {
+      method: 'POST',
+      body: JSON.stringify({ shiftIds }),
+    }),
+
+  // Weekly View
+  getWeeklyView: (weekStart) => {
+    const params = weekStart ? `?weekStart=${weekStart}` : '';
+    return request(`/admin/weekly-view${params}`);
+  },
+
+  getUserPayWeeks: (userId, params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    return request(`/admin/users/${userId}/pay-weeks${queryString ? `?${queryString}` : ''}`);
+  },
+
+  // Paginated Activity
+  getActivity: (params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    return request(`/admin/dashboard/activity${queryString ? `?${queryString}` : ''}`);
+  },
+};
+
+// Notifications API
+export const notificationsAPI = {
+  getNotifications: (params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    return request(`/notifications${queryString ? `?${queryString}` : ''}`);
+  },
+
+  getUnreadCount: () => request('/notifications/count'),
+
+  markRead: (id) =>
+    request(`/notifications/${id}/read`, {
+      method: 'POST',
+    }),
+
+  markAllRead: () =>
+    request('/notifications/read-all', {
+      method: 'POST',
+    }),
+
+  deleteNotification: (id) =>
+    request(`/notifications/${id}`, {
+      method: 'DELETE',
+    }),
 };
