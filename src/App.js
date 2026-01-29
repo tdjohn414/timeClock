@@ -37,6 +37,7 @@ function TimeClock() {
   const [editingShift, setEditingShift] = useState(null);
   const [viewingShift, setViewingShift] = useState(null);
   const [viewingShiftLoading, setViewingShiftLoading] = useState(false);
+  const [expandedTaskBlocks, setExpandedTaskBlocks] = useState(new Set());
   const [creatingShift, setCreatingShift] = useState(false);
   const [newShiftData, setNewShiftData] = useState({
     userId: '',
@@ -2886,16 +2887,59 @@ function TimeClock() {
                   <h3>Time Blocks ({viewingShift.timeBlocks?.length || 0})</h3>
                   {viewingShift.timeBlocks && viewingShift.timeBlocks.length > 0 ? (
                     <div className="time-blocks-stack">
-                      {viewingShift.timeBlocks.map((block, idx) => (
-                        <div key={block.id || idx} className={`time-block-row ${block.is_break ? 'break' : ''}`}>
-                          <span className="block-time-col">{formatTime(block.start_time)} → {formatTime(block.end_time) || '...'}</span>
-                          {block.is_break ? (
-                            <span className="block-task-col break-text">Break</span>
-                          ) : (
-                            <span className="block-task-col">{block.tasks || '-'}</span>
-                          )}
-                        </div>
-                      ))}
+                      {viewingShift.timeBlocks.map((block, idx) => {
+                        const blockKey = block.id || idx;
+                        const isExpanded = expandedTaskBlocks.has(blockKey);
+                        // Parse tasks - split by bullet point separator
+                        const taskItems = block.tasks
+                          ? block.tasks.split(/\s*[•·]\s*/).filter(t => t.trim())
+                          : [];
+                        const totalLength = block.tasks?.length || 0;
+                        const needsExpansion = totalLength > 500;
+
+                        return (
+                          <div key={blockKey} className={`time-block-row ${block.is_break ? 'break' : ''}`}>
+                            <span className="block-time-col">{formatTime(block.start_time)} → {formatTime(block.end_time) || '...'}</span>
+                            {block.is_break ? (
+                              <span className="block-task-col break-text">Break</span>
+                            ) : (
+                              <div className="block-task-col">
+                                {taskItems.length > 0 ? (
+                                  <>
+                                    <ul className={`task-list ${needsExpansion && !isExpanded ? 'collapsed' : ''}`}>
+                                      {taskItems.map((task, taskIdx) => (
+                                        <li key={taskIdx}>
+                                          <span className="task-content">{task}</span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                    {needsExpansion && (
+                                      <button
+                                        className="see-more-btn"
+                                        onClick={() => {
+                                          setExpandedTaskBlocks(prev => {
+                                            const next = new Set(prev);
+                                            if (next.has(blockKey)) {
+                                              next.delete(blockKey);
+                                            } else {
+                                              next.add(blockKey);
+                                            }
+                                            return next;
+                                          });
+                                        }}
+                                      >
+                                        {isExpanded ? 'Show less' : 'Show more...'}
+                                      </button>
+                                    )}
+                                  </>
+                                ) : (
+                                  <span>-</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : (
                     <p className="no-time-blocks">No time blocks recorded for this shift</p>
