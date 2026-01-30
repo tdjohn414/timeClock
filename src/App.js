@@ -496,9 +496,36 @@ function TimeClock() {
       setAdminToast({ type: 'success', message: 'Shift approved' });
       loadPendingShifts();
       loadDashboard(); // Refresh pending count
+      // Refresh All Shifts view if it has data
+      if (shiftsWeeks.length > 0) {
+        loadShiftsByWeek(true);
+      }
+      // Close shift detail view if viewing the approved shift
+      if (viewingShift?.id === shiftId) {
+        setViewingShift(null);
+      }
     } catch (err) {
       console.error('Failed to approve shift:', err);
       setAdminToast({ type: 'error', message: err.message || 'Failed to approve shift' });
+    }
+  };
+
+  // Revert an approved shift back to pending
+  const handleRevertToPending = async (shiftId) => {
+    try {
+      await adminAPI.revertToPending(shiftId);
+      setAdminToast({ type: 'success', message: 'Shift reverted to pending approval' });
+      loadPendingShifts();
+      loadDashboard();
+      if (shiftsWeeks.length > 0) {
+        loadShiftsByWeek(true);
+      }
+      if (viewingShift?.id === shiftId) {
+        setViewingShift(null);
+      }
+    } catch (err) {
+      console.error('Failed to revert shift:', err);
+      setAdminToast({ type: 'error', message: err.message || 'Failed to revert shift' });
     }
   };
 
@@ -511,6 +538,14 @@ function TimeClock() {
       setRejectReason('');
       loadPendingShifts();
       loadDashboard();
+      // Refresh All Shifts view if it has data
+      if (shiftsWeeks.length > 0) {
+        loadShiftsByWeek(true);
+      }
+      // Close shift detail view if viewing the rejected shift
+      if (viewingShift?.id === shiftId) {
+        setViewingShift(null);
+      }
     } catch (err) {
       console.error('Failed to reject shift:', err);
       setAdminToast({ type: 'error', message: err.message || 'Failed to reject shift' });
@@ -3423,7 +3458,6 @@ function TimeClock() {
                   <div className="shift-approval-actions">
                     <button className="btn-approve-large" onClick={() => {
                       handleApproveShift(viewingShift.id);
-                      setViewingShift(null);
                     }}>
                       ✓ Approve Shift
                     </button>
@@ -3432,6 +3466,15 @@ function TimeClock() {
                       setRejectReason('');
                     }}>
                       ✕ Reject Shift
+                    </button>
+                  </div>
+                )}
+                {viewingShift.status === 'approved' && (
+                  <div className="shift-approval-actions">
+                    <button className="btn-revert-large" onClick={() => {
+                      handleRevertToPending(viewingShift.id);
+                    }}>
+                      ↩ Revert to Pending
                     </button>
                   </div>
                 )}

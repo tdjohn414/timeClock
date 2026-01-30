@@ -403,6 +403,11 @@ export const adminAPI = {
       method: 'POST',
     }),
 
+  revertToPending: (id) =>
+    request(`/admin/shifts/${id}/revert-to-pending`, {
+      method: 'POST',
+    }),
+
   rejectShift: (id, reason) =>
     request(`/admin/shifts/${id}/reject`, {
       method: 'POST',
