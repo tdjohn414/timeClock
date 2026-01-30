@@ -3965,7 +3965,8 @@ function TimeClock() {
 
           {/* Pending Approval Sub-Tab */}
           {adminSubTab === 'pending' && (
-            <div className="admin-content">
+            <div className="admin-content pending-approval-layout">
+              <div className="pending-section">
               <div className="pending-header">
                 <h3>Shifts Pending Approval</h3>
                 {selectedPendingShifts.size > 0 && (
@@ -4029,6 +4030,7 @@ function TimeClock() {
                   ))}
                 </div>
               )}
+              </div>
 
               {/* Approved Shifts Section */}
               <div className="approved-shifts-section">

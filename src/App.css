@@ -3990,11 +3990,24 @@
   max-width: 300px;
 }
 
+/* Pending Approval Layout */
+.pending-approval-layout {
+  display: flex;
+  flex-direction: column;
+}
+
+.pending-section {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 /* Approved Shifts Section */
 .approved-shifts-section {
-  margin-top: 32px;
+  margin-top: auto;
   padding-top: 24px;
   border-top: 1px solid #e2e8f0;
+  flex-shrink: 0;
 }
 
 .approved-shifts-section h3 {
