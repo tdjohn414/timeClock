@@ -8,6 +8,33 @@ import './App.css';
 // Hardcoded admin email
 const ADMIN_EMAIL = 'tyler@fullscopeestimating.com';
 
+// Generate consistent avatar gradient from name
+const getAvatarGradient = (name) => {
+  const gradients = [
+    'linear-gradient(135deg, #667eea, #764ba2)',
+    'linear-gradient(135deg, #f093fb, #f5576c)',
+    'linear-gradient(135deg, #4facfe, #00f2fe)',
+    'linear-gradient(135deg, #43e97b, #38f9d7)',
+    'linear-gradient(135deg, #fa709a, #fee140)',
+    'linear-gradient(135deg, #a8edea, #fed6e3)',
+    'linear-gradient(135deg, #ff9a9e, #fecfef)',
+    'linear-gradient(135deg, #a18cd1, #fbc2eb)',
+    'linear-gradient(135deg, #ffecd2, #fcb69f)',
+    'linear-gradient(135deg, #667eea, #764ba2)',
+    'linear-gradient(135deg, #11998e, #38ef7d)',
+    'linear-gradient(135deg, #fc4a1a, #f7b733)',
+    'linear-gradient(135deg, #00b4db, #0083b0)',
+    'linear-gradient(135deg, #834d9b, #d04ed6)',
+    'linear-gradient(135deg, #1d976c, #93f9b9)',
+  ];
+  // Hash the name to get consistent index
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return gradients[Math.abs(hash) % gradients.length];
+};
+
 function TimeClock() {
   const { user, logout } = useAuth();
   const [completedBlocks, setCompletedBlocks] = useState([]);
@@ -40,6 +67,7 @@ function TimeClock() {
   const [shiftsWeeksOffset, setShiftsWeeksOffset] = useState(0);
   const [shiftsWeeksHasMore, setShiftsWeeksHasMore] = useState(true);
   const [shiftsEmployeeFilter, setShiftsEmployeeFilter] = useState('');
+  const [shiftsStatusFilter, setShiftsStatusFilter] = useState('');
   const [editingShift, setEditingShift] = useState(null);
   const [viewingShift, setViewingShift] = useState(null);
   const [viewingShiftLoading, setViewingShiftLoading] = useState(false);
@@ -109,6 +137,9 @@ function TimeClock() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
   const notificationRef = useRef(null);
+  const shiftsScrollRef = useRef(null);
+  const shiftsLoadingRef = useRef(false);
+  const shiftsHasMoreRef = useRef(true);
 
   // Admin Panel Redesign State
   const [pendingShifts, setPendingShifts] = useState([]);
@@ -209,15 +240,34 @@ function TimeClock() {
     }
   }, [activeTab, adminSubTab, isAdmin]);
 
-  // Auto-dismiss admin toast after 4 seconds for success messages
+  // Auto-dismiss admin toast after 3 seconds for all messages
   useEffect(() => {
-    if (adminToast && adminToast.type === 'success') {
+    if (adminToast) {
       const timer = setTimeout(() => {
         setAdminToast(null);
-      }, 4000);
+      }, 3000);
       return () => clearTimeout(timer);
     }
   }, [adminToast]);
+
+  // Infinite scroll for All Shifts view
+  useEffect(() => {
+    const sentinel = shiftsScrollRef.current;
+    if (!sentinel || !shiftsWeeksHasMore) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        // Use refs to get current values, avoiding stale closure issues
+        if (entries[0].isIntersecting && shiftsHasMoreRef.current && !shiftsLoadingRef.current) {
+          loadShiftsByWeek(false);
+        }
+      },
+      { threshold: 0.1, rootMargin: '100px' }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [shiftsWeeksHasMore, shiftsWeeks.length]);
 
   const loadDashboard = async () => {
     setAdminLoading(true);
@@ -268,7 +318,8 @@ function TimeClock() {
 
   // Load shifts grouped by week for infinite scroll
   const loadShiftsByWeek = async (reset = false) => {
-    if (shiftsWeeksLoading) return;
+    if (shiftsLoadingRef.current) return;
+    shiftsLoadingRef.current = true;
     setShiftsWeeksLoading(true);
     try {
       const offset = reset ? 0 : shiftsWeeksOffset;
@@ -284,11 +335,13 @@ function TimeClock() {
         setShiftsWeeks(prev => [...prev, ...(data.weeks || [])]);
         setShiftsWeeksOffset(data.nextOffset ?? (shiftsWeeksOffset + 1));
       }
+      shiftsHasMoreRef.current = data.hasMore;
       setShiftsWeeksHasMore(data.hasMore);
     } catch (err) {
       console.error('Failed to load shifts by week:', err);
       setAdminToast({ type: 'error', message: 'Failed to load shifts' });
     } finally {
+      shiftsLoadingRef.current = false;
       setShiftsWeeksLoading(false);
     }
   };
@@ -324,11 +377,13 @@ function TimeClock() {
 
   // Load user pay weeks
   const loadUserPayWeeks = async (userId) => {
+    // Show loading view immediately
+    setViewingUserPayWeeks(userId);
     setUserPayWeeksLoading(true);
+    setUserPayWeeksData(null);
     try {
       const data = await adminAPI.getUserPayWeeks(userId);
       setUserPayWeeksData(data);
-      setViewingUserPayWeeks(userId);
       // Auto-expand all pay weeks by default
       if (data.payWeeks && data.payWeeks.length > 0) {
         setExpandedPayWeeks(new Set(data.payWeeks.map(w => w.weekStart)));
@@ -336,6 +391,7 @@ function TimeClock() {
     } catch (err) {
       console.error('Failed to load user pay weeks:', err);
       setAdminToast({ type: 'error', message: 'Failed to load pay weeks' });
+      setViewingUserPayWeeks(null); // Go back on error
     } finally {
       setUserPayWeeksLoading(false);
     }
@@ -2132,6 +2188,9 @@ function TimeClock() {
                   className="user-name-btn"
                   onClick={() => setShowUserDropdown(!showUserDropdown)}
                 >
+                  <div className="header-avatar" style={{ background: getAvatarGradient(user.name) }}>
+                    {user.name.charAt(0).toUpperCase()}
+                  </div>
                   {user.name}
                   <span className="dropdown-arrow">{showUserDropdown ? '▲' : '▼'}</span>
                 </button>
@@ -3013,26 +3072,26 @@ function TimeClock() {
             {/* Sidebar Navigation */}
             <aside className="admin-sidebar">
               <nav className="admin-nav">
-                <button className={`admin-nav-item ${adminSubTab === 'dashboard' ? 'active' : ''}`} onClick={() => setAdminSubTab('dashboard')}>
+                <button className={`admin-nav-item ${adminSubTab === 'dashboard' ? 'active' : ''}`} onClick={() => { setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('dashboard'); }}>
                   <span className="nav-icon">📊</span>
                   <span className="nav-label">Dashboard</span>
                 </button>
-                <button className={`admin-nav-item ${adminSubTab === 'pending' ? 'active' : ''}`} onClick={() => { setAdminSubTab('pending'); loadPendingShifts(); }}>
+                <button className={`admin-nav-item ${adminSubTab === 'pending' ? 'active' : ''}`} onClick={() => { setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('pending'); loadPendingShifts(); }}>
                   <span className="nav-icon">⏳</span>
                   <span className="nav-label">Pending Approval</span>
                   {dashboardData?.pendingApprovalCount > 0 && (
                     <span className="nav-badge">{dashboardData.pendingApprovalCount}</span>
                   )}
                 </button>
-                <button className={`admin-nav-item ${adminSubTab === 'weekly' ? 'active' : ''}`} onClick={() => { setAdminSubTab('weekly'); loadWeeklyView(); }}>
+                <button className={`admin-nav-item ${adminSubTab === 'weekly' ? 'active' : ''}`} onClick={() => { setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('weekly'); loadWeeklyView(); }}>
                   <span className="nav-icon">📅</span>
                   <span className="nav-label">Weekly View</span>
                 </button>
-                <button className={`admin-nav-item ${adminSubTab === 'users' ? 'active' : ''}`} onClick={() => setAdminSubTab('users')}>
+                <button className={`admin-nav-item ${adminSubTab === 'users' ? 'active' : ''}`} onClick={() => { setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('users'); }}>
                   <span className="nav-icon">👥</span>
                   <span className="nav-label">Employees</span>
                 </button>
-                <button className={`admin-nav-item ${adminSubTab === 'shifts' ? 'active' : ''}`} onClick={() => setAdminSubTab('shifts')}>
+                <button className={`admin-nav-item ${adminSubTab === 'shifts' ? 'active' : ''}`} onClick={() => { setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('shifts'); }}>
                   <span className="nav-icon">🕐</span>
                   <span className="nav-label">All Shifts</span>
                 </button>
@@ -3042,6 +3101,92 @@ function TimeClock() {
             {/* Main Content Area */}
             <div className="admin-main">
 
+          {/* User Details View - Top Level (accessible from anywhere) */}
+          {viewingUserPayWeeks ? (
+            <div className="admin-content">
+              <div className="user-pay-weeks-view">
+                <button className="btn-back" onClick={() => { setViewingUserPayWeeks(null); setUserPayWeeksData(null); }}>
+                  ← Back
+                </button>
+                {userPayWeeksLoading ? (
+                  <div className="loading-spinner-container">
+                    <div className="loading-spinner"></div>
+                    <p>Loading user details...</p>
+                  </div>
+                ) : userPayWeeksData ? (
+                  <div className="user-details-layout">
+                    {/* Left Column - User Info */}
+                    <div className="user-info-column">
+                      <div className="user-info-card">
+                        <div className="user-avatar" style={{ background: getAvatarGradient(userPayWeeksData.user.name) }}>
+                          {userPayWeeksData.user.name.charAt(0).toUpperCase()}
+                        </div>
+                        <h2 className="user-name">{userPayWeeksData.user.name}</h2>
+                        <p className="user-email">{userPayWeeksData.user.email}</p>
+                        <div className="user-stats">
+                          <div className="user-stat">
+                            <span className="stat-number">
+                              {userPayWeeksData.payWeeks.reduce((sum, w) => sum + w.approvedHours, 0).toFixed(1)}
+                            </span>
+                            <span className="stat-label">Total Hours</span>
+                          </div>
+                          <div className="user-stat">
+                            <span className="stat-number">
+                              {userPayWeeksData.payWeeks.reduce((sum, w) => sum + w.shifts.length, 0)}
+                            </span>
+                            <span className="stat-label">Total Shifts</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right Column - Shifts List */}
+                    <div className="user-shifts-column">
+                      <h3 className="shifts-column-header">Pay Weeks</h3>
+                      <div className="pay-weeks-list">
+                        {userPayWeeksData.payWeeks.map((week, idx) => {
+                          const isExpanded = expandedPayWeeks.has(week.weekStart);
+                          return (
+                            <div key={week.weekStart} className="pay-week-card">
+                              <div
+                                className="pay-week-header"
+                                onClick={() => {
+                                  const newSet = new Set(expandedPayWeeks);
+                                  if (isExpanded) {
+                                    newSet.delete(week.weekStart);
+                                  } else {
+                                    newSet.add(week.weekStart);
+                                  }
+                                  setExpandedPayWeeks(newSet);
+                                }}
+                              >
+                                <span className="week-dates">{week.weekDisplay}</span>
+                                <span className="week-hours">{week.approvedHours} hrs approved</span>
+                                <span className="expand-icon">{isExpanded ? '▼' : '▶'}</span>
+                              </div>
+                              {isExpanded && (
+                                <div className="pay-week-shifts">
+                                  {week.shifts.map(shift => (
+                                    <div key={shift.id} className="pay-week-shift-row">
+                                      <span className="shift-date">{new Date(shift.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                                      <span className="shift-times">{formatTime(shift.clockInTime)} - {formatTime(shift.clockOutTime)}</span>
+                                      <span className="shift-hours">{shift.totalHours} hrs</span>
+                                      <span className={`status-badge ${shift.status}`}>{shift.status.replace('_', ' ')}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+          <>
           {/* Dashboard Sub-Tab */}
           {adminSubTab === 'dashboard' && (
             <div className="admin-content">
@@ -3122,7 +3267,8 @@ function TimeClock() {
                               const isApproved = activity.shift_status === 'approved' || activity.shift_status === 'paid';
                               consolidated.push({
                                 ...activity,
-                                isApproved
+                                isApproved,
+                                approvalTime: activity.approval_timestamp
                               });
                             } else {
                               // Non-shift activities pass through unchanged
@@ -3192,7 +3338,9 @@ function TimeClock() {
                                         : <><strong>{adminName}</strong> created shift for <strong>{targetName}</strong></>
                                       }
                                       {activity.isApproved && (
-                                        <span className="approval-timestamp">Approved</span>
+                                        <span className="approval-timestamp">
+                                          Approved {activity.approvalTime ? formatActivityTime(activity.approvalTime) : ''}
+                                        </span>
                                       )}
                                     </>
                                   );
@@ -3420,6 +3568,51 @@ function TimeClock() {
                   <button className="btn-create" onClick={() => { if (adminUsers.length === 0) loadAdminUsers(); setCreatingShift(true); }}>+ Create Shift</button>
                 </div>
 
+                {/* Filter Pills */}
+                <div className="shifts-filters">
+                  <div className="filter-group">
+                    <span className="filter-label">Employee:</span>
+                    <div className="filter-pills">
+                      <button
+                        className={`filter-pill ${shiftsEmployeeFilter === '' ? 'active' : ''}`}
+                        onClick={() => { setShiftsEmployeeFilter(''); setShiftsWeeks([]); setShiftsWeeksOffset(0); setShiftsWeeksHasMore(true); shiftsHasMoreRef.current = true; }}
+                      >
+                        All
+                      </button>
+                      {/* Get unique employees from loaded shifts */}
+                      {[...new Map(shiftsWeeks.flatMap(w => w.shifts || []).map(s => [s.user_id, { id: s.user_id, name: s.userName || s.user_name }])).values()].map(emp => (
+                        <button
+                          key={emp.id}
+                          className={`filter-pill ${shiftsEmployeeFilter === String(emp.id) ? 'active' : ''}`}
+                          onClick={() => { setShiftsEmployeeFilter(String(emp.id)); setShiftsWeeks([]); setShiftsWeeksOffset(0); setShiftsWeeksHasMore(true); shiftsHasMoreRef.current = true; }}
+                        >
+                          {emp.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="filter-group">
+                    <span className="filter-label">Status:</span>
+                    <div className="filter-pills">
+                      <button
+                        className={`filter-pill ${shiftsStatusFilter === '' ? 'active' : ''}`}
+                        onClick={() => setShiftsStatusFilter('')}
+                      >
+                        All
+                      </button>
+                      {['pending_approval', 'approved', 'paid', 'rejected'].map(status => (
+                        <button
+                          key={status}
+                          className={`filter-pill status-${status} ${shiftsStatusFilter === status ? 'active' : ''}`}
+                          onClick={() => setShiftsStatusFilter(status)}
+                        >
+                          {status.replace('_', ' ')}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
                 {shiftsWeeksLoading && shiftsWeeks.length === 0 ? (
                   <p className="loading-text">Loading shifts...</p>
                 ) : shiftsWeeks.length === 0 ? (
@@ -3428,11 +3621,17 @@ function TimeClock() {
                   </div>
                 ) : (
                   <div className="weeks-list">
-                    {shiftsWeeks.map((week, weekIdx) => (
+                    {shiftsWeeks.map((week, weekIdx) => {
+                      // Filter shifts by status if filter is set
+                      const filteredShifts = shiftsStatusFilter
+                        ? (week.shifts || []).filter(s => s.status === shiftsStatusFilter)
+                        : (week.shifts || []);
+                      if (filteredShifts.length === 0) return null;
+                      return (
                       <div key={week.weekStart} className="week-section">
-                        <div className="week-header">
+                        <div className="week-header centered">
                           <h3>{week.weekDisplay}</h3>
-                          <span className="week-shift-count">{week.shifts?.length || 0} shifts</span>
+                          <span className="week-shift-count">{filteredShifts.length} shifts</span>
                         </div>
                         <div className="week-shifts-table">
                           <table className="admin-table">
@@ -3448,7 +3647,7 @@ function TimeClock() {
                               </tr>
                             </thead>
                             <tbody>
-                              {week.shifts?.map(s => (
+                              {filteredShifts.map(s => (
                                 <tr
                                   key={s.id}
                                   className="clickable-row"
@@ -3470,16 +3669,15 @@ function TimeClock() {
                           </table>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
+                    {/* Infinite scroll sentinel - only show when more data available */}
                     {shiftsWeeksHasMore && (
-                      <div className="load-more-container">
-                        <button
-                          className="btn-load-more"
-                          onClick={() => loadShiftsByWeek(false)}
-                          disabled={shiftsWeeksLoading}
-                        >
-                          {shiftsWeeksLoading ? 'Loading...' : 'Load More Weeks'}
-                        </button>
+                      <div
+                        className="infinite-scroll-sentinel"
+                        ref={shiftsScrollRef}
+                      >
+                        {shiftsWeeksLoading && <div className="loading-spinner"></div>}
                       </div>
                     )}
                   </div>
@@ -3589,63 +3787,6 @@ function TimeClock() {
           {/* Weekly View Sub-Tab */}
           {adminSubTab === 'weekly' && (
             <div className="admin-content">
-              {viewingUserPayWeeks ? (
-                /* User Pay Weeks View */
-                <div className="user-pay-weeks-view">
-                  <button className="btn-back" onClick={() => { setViewingUserPayWeeks(null); setUserPayWeeksData(null); }}>
-                    ← Back to Weekly View
-                  </button>
-                  {userPayWeeksLoading ? (
-                    <p className="loading-text">Loading pay weeks...</p>
-                  ) : userPayWeeksData ? (
-                    <>
-                      <div className="user-header">
-                        <h3>{userPayWeeksData.user.name}</h3>
-                        <span className="user-email">{userPayWeeksData.user.email}</span>
-                      </div>
-                      <div className="pay-weeks-list">
-                        {userPayWeeksData.payWeeks.map((week, idx) => {
-                          const isExpanded = expandedPayWeeks.has(week.weekStart);
-                          return (
-                            <div key={week.weekStart} className="pay-week-card">
-                              <div
-                                className="pay-week-header"
-                                onClick={() => {
-                                  const newSet = new Set(expandedPayWeeks);
-                                  if (isExpanded) {
-                                    newSet.delete(week.weekStart);
-                                  } else {
-                                    newSet.add(week.weekStart);
-                                  }
-                                  setExpandedPayWeeks(newSet);
-                                }}
-                              >
-                                <span className="week-dates">{week.weekDisplay}</span>
-                                <span className="week-hours">{week.approvedHours} hrs approved</span>
-                                <span className="expand-icon">{isExpanded ? '▼' : '▶'}</span>
-                              </div>
-                              {isExpanded && (
-                                <div className="pay-week-shifts">
-                                  {week.shifts.map(shift => (
-                                    <div key={shift.id} className="pay-week-shift-row">
-                                      <span className="shift-date">{new Date(shift.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
-                                      <span className="shift-times">{formatTime(shift.clockInTime)} - {formatTime(shift.clockOutTime)}</span>
-                                      <span className="shift-hours">{shift.totalHours} hrs</span>
-                                      <span className={`status-badge ${shift.status}`}>{shift.status.replace('_', ' ')}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </>
-                  ) : null}
-                </div>
-              ) : (
-                /* Main Weekly View */
-                <>
                   <div className="weekly-view-container">
                     {/* Weeks Sidebar */}
                     {showWeeksSidebar && (
@@ -3795,8 +3936,6 @@ function TimeClock() {
                   )}
                     </div>{/* End weekly-main-content */}
                   </div>{/* End weekly-view-container */}
-                </>
-              )}
             </div>
           )}
 
@@ -4025,6 +4164,8 @@ function TimeClock() {
                 </div>
               </div>
             </div>
+          )}
+          </>
           )}
 
             </div>{/* End admin-main */}
