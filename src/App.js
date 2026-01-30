@@ -2185,25 +2185,35 @@ function TimeClock() {
 
       <header className="header">
         <div className="header-top">
-          <button
-            type="button"
+          <div
             className="header-logo"
+            role="button"
+            tabIndex={0}
+            style={{ cursor: 'pointer' }}
             onClick={() => {
-              if (user?.role === 'admin') {
+              setViewingShift(null);
+              setViewingUserPayWeeks(null);
+              setUserPayWeeksData(null);
+              setEditingShift(null);
+              setCreatingShift(false);
+              setEditingUser(null);
+              setCreatingUser(false);
+              setStatusDropdownShiftId(null);
+              setShiftsSelectMode(false);
+              setSelectedShiftIds(new Set());
+              setDeleteConfirm(null);
+              if (isAdmin) {
                 setActiveTab('admin');
                 setAdminSubTab('dashboard');
-                setViewingUserPayWeeks(null);
-                setUserPayWeeksData(null);
-                setViewingShift(null);
-                setStatusDropdownShiftId(null);
-                setShiftsSelectMode(false);
-                setSelectedShiftIds(new Set());
+                loadDashboard();
+              } else {
+                setActiveTab('clock');
               }
             }}
           >
             <span className="logo-company">FULL SCOPE ESTIMATING</span>
             <span className="logo-app">Time Clock</span>
-          </button>
+          </div>
           <div className="header-right">
             {/* Test Controls - Commented out for production
             <div className="test-controls">
@@ -3218,26 +3228,26 @@ function TimeClock() {
             {/* Sidebar Navigation */}
             <aside className="admin-sidebar">
               <nav className="admin-nav">
-                <button className={`admin-nav-item ${adminSubTab === 'dashboard' ? 'active' : ''}`} onClick={() => { setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('dashboard'); }}>
+                <button className={`admin-nav-item ${adminSubTab === 'dashboard' ? 'active' : ''}`} onClick={() => { setViewingShift(null); setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('dashboard'); }}>
                   <span className="nav-icon">📊</span>
                   <span className="nav-label">Dashboard</span>
                 </button>
-                <button className={`admin-nav-item ${adminSubTab === 'pending' ? 'active' : ''}`} onClick={() => { setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('pending'); loadPendingShifts(); }}>
+                <button className={`admin-nav-item ${adminSubTab === 'pending' ? 'active' : ''}`} onClick={() => { setViewingShift(null); setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('pending'); loadPendingShifts(); }}>
                   <span className="nav-icon">⏳</span>
                   <span className="nav-label">Pending Approval</span>
                   {dashboardData?.pendingApprovalCount > 0 && (
                     <span className="nav-badge">{dashboardData.pendingApprovalCount}</span>
                   )}
                 </button>
-                <button className={`admin-nav-item ${adminSubTab === 'weekly' ? 'active' : ''}`} onClick={() => { setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('weekly'); loadWeeklyView(); }}>
+                <button className={`admin-nav-item ${adminSubTab === 'weekly' ? 'active' : ''}`} onClick={() => { setViewingShift(null); setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('weekly'); loadWeeklyView(); }}>
                   <span className="nav-icon">📅</span>
                   <span className="nav-label">Weekly View</span>
                 </button>
-                <button className={`admin-nav-item ${adminSubTab === 'users' ? 'active' : ''}`} onClick={() => { setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('users'); }}>
+                <button className={`admin-nav-item ${adminSubTab === 'users' ? 'active' : ''}`} onClick={() => { setViewingShift(null); setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('users'); }}>
                   <span className="nav-icon">👥</span>
                   <span className="nav-label">Employees</span>
                 </button>
-                <button className={`admin-nav-item ${adminSubTab === 'shifts' ? 'active' : ''}`} onClick={() => { setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('shifts'); }}>
+                <button className={`admin-nav-item ${adminSubTab === 'shifts' ? 'active' : ''}`} onClick={() => { setViewingShift(null); setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('shifts'); }}>
                   <span className="nav-icon">🕐</span>
                   <span className="nav-label">All Shifts</span>
                 </button>

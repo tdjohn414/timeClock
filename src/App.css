@@ -24,13 +24,25 @@
   flex-direction: column;
   background: transparent;
   border: none;
-  padding: 0;
+  padding: 8px;
+  margin: -8px;
   cursor: pointer;
   text-align: left;
+  position: relative;
+  z-index: 9999;
 }
 
 .header-logo:hover .logo-app {
   color: #2563eb;
+}
+
+.header-logo:active {
+  opacity: 0.8;
+}
+
+.logo-company,
+.logo-app {
+  pointer-events: none;
 }
 
 .logo-company {
@@ -2378,6 +2390,8 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  border: none;
+  outline: none;
 }
 
 .status-badge.clickable:hover {
@@ -3068,15 +3082,15 @@
 /* ==================== SHIFT DETAIL PAGE ==================== */
 
 .shift-detail-page {
-  max-width: 1400px;
+  width: 1100px;
   margin: 0 auto;
 }
 
 /* Two-column layout: Details left, Time Blocks right */
 .shift-detail-two-column {
   display: grid;
-  grid-template-columns: 350px 1fr;
-  gap: 20px;
+  grid-template-columns: 320px 1fr;
+  gap: 24px;
   align-items: start;
 }
 
