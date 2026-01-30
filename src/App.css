@@ -2581,6 +2581,42 @@
   color: white;
 }
 
+/* Icon buttons for actions */
+.btn-icon {
+  background: transparent;
+  border: none;
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #64748b;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-icon:hover {
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.btn-icon.danger {
+  color: #94a3b8;
+}
+
+.btn-icon.danger:hover {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.action-cell .btn-icon {
+  margin-right: 4px;
+}
+
+.action-cell .btn-icon:last-child {
+  margin-right: 0;
+}
+
 /* Shift Details Modal */
 .shift-details-modal {
   max-width: 600px;

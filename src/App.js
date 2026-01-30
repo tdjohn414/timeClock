@@ -3247,8 +3247,129 @@ function TimeClock() {
             {/* Main Content Area */}
             <div className="admin-main">
 
-          {/* User Details View - Top Level (accessible from anywhere) */}
-          {viewingUserPayWeeks ? (
+          {/* Shift Details View - Top Level (accessible from anywhere) */}
+          {viewingShift ? (
+            <div className="admin-content shift-detail-page">
+              <div className="breadcrumb-nav">
+                <button className="breadcrumb-link" onClick={() => setViewingShift(null)}>
+                  ← Back
+                </button>
+                <span className="breadcrumb-separator">/</span>
+                <span className="breadcrumb-current">Shift #{viewingShift.id}</span>
+              </div>
+
+              <div className="shift-detail-two-column">
+              {/* Column 1: Shift Details */}
+              <div className="shift-detail-card">
+                <div className="shift-detail-card-header">
+                  <h2>Shift Details</h2>
+                  <div className="shift-detail-actions">
+                    <button className="btn-icon" title="Edit" onClick={() => { setEditingShift({...viewingShift}); }}>✏️</button>
+                    <button className="btn-icon danger" title="Delete" onClick={() => setDeleteConfirm({ type: 'shift', id: viewingShift.id })}>🗑️</button>
+                  </div>
+                </div>
+
+                <div className="shift-details-list">
+                  <div className="detail-row clickable" onClick={() => loadUserPayWeeks(viewingShift.user_id)}>
+                    <span className="detail-label">Employee</span>
+                    <span className="detail-value link">{viewingShift.user_name}</span>
+                  </div>
+                  <div className="detail-row">
+                    <span className="detail-label">Email</span>
+                    <span className="detail-value">{viewingShift.user_email}</span>
+                  </div>
+                  <div className="detail-row">
+                    <span className="detail-label">Date</span>
+                    <span className="detail-value">{formatDate(viewingShift.date)}</span>
+                  </div>
+                  <div className="detail-row">
+                    <span className="detail-label">Clock In</span>
+                    <span className="detail-value">{formatTime(viewingShift.clock_in_time)}</span>
+                  </div>
+                  <div className="detail-row">
+                    <span className="detail-label">Clock Out</span>
+                    <span className="detail-value">{formatTime(viewingShift.clock_out_time) || '-'}</span>
+                  </div>
+                  <div className="detail-row">
+                    <span className="detail-label">Total Hours</span>
+                    <span className="detail-value highlight">{viewingShift.total_hours || '0'} hrs</span>
+                  </div>
+                  <div className="detail-row">
+                    <span className="detail-label">Status</span>
+                    <span className={`status-badge ${viewingShift.status}`}>{viewingShift.status?.replace('_', ' ')}</span>
+                  </div>
+                  <div className="detail-row">
+                    <span className="detail-label">Shift ID</span>
+                    <span className="detail-value">#{viewingShift.id}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Column 2: Time Blocks */}
+              <div className="time-blocks-card">
+                <h3>Time Blocks ({viewingShift.timeBlocks?.length || 0})</h3>
+                {viewingShift.timeBlocks && viewingShift.timeBlocks.length > 0 ? (
+                  <div className="time-blocks-stack">
+                    {viewingShift.timeBlocks.map((block, idx) => {
+                      const blockKey = block.id || idx;
+                      const isExpanded = expandedTaskBlocks.has(blockKey);
+                      const taskItems = block.tasks
+                        ? block.tasks.split(/\s*[•·]\s*/).filter(t => t.trim())
+                        : [];
+                      const totalLength = block.tasks?.length || 0;
+                      const needsExpansion = totalLength > 500;
+
+                      return (
+                        <div key={blockKey} className={`time-block-row ${block.is_break ? 'break' : ''}`}>
+                          <span className="block-time-col">{formatTime(block.start_time)} → {formatTime(block.end_time) || '...'}</span>
+                          {block.is_break ? (
+                            <span className="block-task-col break-text">Break</span>
+                          ) : (
+                            <div className="block-task-col">
+                              {taskItems.length > 0 ? (
+                                <>
+                                  <ul className={`task-list ${needsExpansion && !isExpanded ? 'collapsed' : ''}`}>
+                                    {taskItems.map((task, taskIdx) => (
+                                      <li key={taskIdx}>
+                                        <span className="task-content">{task}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                  {needsExpansion && (
+                                    <button
+                                      className="see-more-btn"
+                                      onClick={() => {
+                                        setExpandedTaskBlocks(prev => {
+                                          const next = new Set(prev);
+                                          if (next.has(blockKey)) {
+                                            next.delete(blockKey);
+                                          } else {
+                                            next.add(blockKey);
+                                          }
+                                          return next;
+                                        });
+                                      }}
+                                    >
+                                      {isExpanded ? 'Show less' : 'Show more...'}
+                                    </button>
+                                  )}
+                                </>
+                              ) : (
+                                <span>-</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="no-time-blocks">No time blocks recorded for this shift</p>
+                )}
+              </div>
+            </div>
+            </div>
+          ) : viewingUserPayWeeks ? (
             <div className="admin-content">
               <div className="user-pay-weeks-view">
                 <button className="btn-back" onClick={() => { setViewingUserPayWeeks(null); setUserPayWeeksData(null); }}>
@@ -3583,131 +3704,6 @@ function TimeClock() {
 
           {/* Shifts Sub-Tab */}
           {adminSubTab === 'shifts' && (
-            viewingShift ? (
-              /* Full Page Shift Details */
-              <div className="shift-detail-page">
-                <div className="breadcrumb-nav">
-                  <button className="breadcrumb-link" onClick={() => setViewingShift(null)}>
-                    ← Back to Shifts
-                  </button>
-                  <span className="breadcrumb-separator">/</span>
-                  <span className="breadcrumb-current">Shift #{viewingShift.id}</span>
-                </div>
-
-                <div className="shift-detail-two-column">
-                {/* Column 1: Shift Details */}
-                <div className="shift-detail-card">
-                  <div className="shift-detail-card-header">
-                    <h2>Shift Details</h2>
-                    <div className="shift-detail-actions">
-                      <button className="btn-edit-small" onClick={() => { setEditingShift({...viewingShift}); }}>Edit</button>
-                      <button className="btn-delete-small" onClick={() => setDeleteConfirm({ type: 'shift', id: viewingShift.id })}>Delete</button>
-                    </div>
-                  </div>
-
-                  <div className="shift-details-list">
-                    <div className="detail-row">
-                      <span className="detail-label">Employee</span>
-                      <span className="detail-value">{viewingShift.user_name}</span>
-                    </div>
-                    <div className="detail-row">
-                      <span className="detail-label">Email</span>
-                      <span className="detail-value">{viewingShift.user_email}</span>
-                    </div>
-                    <div className="detail-row">
-                      <span className="detail-label">Date</span>
-                      <span className="detail-value">{formatDate(viewingShift.date)}</span>
-                    </div>
-                    <div className="detail-row">
-                      <span className="detail-label">Clock In</span>
-                      <span className="detail-value">{formatTime(viewingShift.clock_in_time)}</span>
-                    </div>
-                    <div className="detail-row">
-                      <span className="detail-label">Clock Out</span>
-                      <span className="detail-value">{formatTime(viewingShift.clock_out_time) || '-'}</span>
-                    </div>
-                    <div className="detail-row">
-                      <span className="detail-label">Total Hours</span>
-                      <span className="detail-value highlight">{viewingShift.total_hours || '0'} hrs</span>
-                    </div>
-                    <div className="detail-row">
-                      <span className="detail-label">Status</span>
-                      <span className={`status-badge ${viewingShift.status}`}>{viewingShift.status}</span>
-                    </div>
-                    <div className="detail-row">
-                      <span className="detail-label">Shift ID</span>
-                      <span className="detail-value">#{viewingShift.id}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Column 2: Time Blocks */}
-                <div className="time-blocks-card">
-                  <h3>Time Blocks ({viewingShift.timeBlocks?.length || 0})</h3>
-                  {viewingShift.timeBlocks && viewingShift.timeBlocks.length > 0 ? (
-                    <div className="time-blocks-stack">
-                      {viewingShift.timeBlocks.map((block, idx) => {
-                        const blockKey = block.id || idx;
-                        const isExpanded = expandedTaskBlocks.has(blockKey);
-                        // Parse tasks - split by bullet point separator
-                        const taskItems = block.tasks
-                          ? block.tasks.split(/\s*[•·]\s*/).filter(t => t.trim())
-                          : [];
-                        const totalLength = block.tasks?.length || 0;
-                        const needsExpansion = totalLength > 500;
-
-                        return (
-                          <div key={blockKey} className={`time-block-row ${block.is_break ? 'break' : ''}`}>
-                            <span className="block-time-col">{formatTime(block.start_time)} → {formatTime(block.end_time) || '...'}</span>
-                            {block.is_break ? (
-                              <span className="block-task-col break-text">Break</span>
-                            ) : (
-                              <div className="block-task-col">
-                                {taskItems.length > 0 ? (
-                                  <>
-                                    <ul className={`task-list ${needsExpansion && !isExpanded ? 'collapsed' : ''}`}>
-                                      {taskItems.map((task, taskIdx) => (
-                                        <li key={taskIdx}>
-                                          <span className="task-content">{task}</span>
-                                        </li>
-                                      ))}
-                                    </ul>
-                                    {needsExpansion && (
-                                      <button
-                                        className="see-more-btn"
-                                        onClick={() => {
-                                          setExpandedTaskBlocks(prev => {
-                                            const next = new Set(prev);
-                                            if (next.has(blockKey)) {
-                                              next.delete(blockKey);
-                                            } else {
-                                              next.add(blockKey);
-                                            }
-                                            return next;
-                                          });
-                                        }}
-                                      >
-                                        {isExpanded ? 'Show less' : 'Show more...'}
-                                      </button>
-                                    )}
-                                  </>
-                                ) : (
-                                  <span>-</span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <p className="no-time-blocks">No time blocks recorded for this shift</p>
-                  )}
-                </div>
-              </div>
-            </div>
-            ) : (
-              /* Shifts List - Grouped by Week with Infinite Scroll */
               <div className="admin-content shifts-by-week">
                 <div className="shifts-header-bar">
                   <h2>All Shifts</h2>
@@ -3823,14 +3819,14 @@ function TimeClock() {
                           <table className="admin-table">
                             <thead>
                               <tr>
-                                {shiftsSelectMode && <th className="checkbox-col"></th>}
+                                <th className="checkbox-col"></th>
                                 <th>Employee</th>
                                 <th>Date</th>
                                 <th>Clock In</th>
                                 <th>Clock Out</th>
                                 <th>Hours</th>
                                 <th>Status</th>
-                                {!shiftsSelectMode && <th>Actions</th>}
+                                <th>Actions</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -3840,15 +3836,15 @@ function TimeClock() {
                                   className={`clickable-row ${selectedShiftIds.has(s.id) ? 'selected-row' : ''}`}
                                   onClick={() => shiftsSelectMode ? toggleShiftSelection(s.id) : viewShiftDetails(s.id)}
                                 >
-                                  {shiftsSelectMode && (
-                                    <td className="checkbox-col" onClick={e => e.stopPropagation()}>
+                                  <td className="checkbox-col" onClick={e => e.stopPropagation()}>
+                                    {shiftsSelectMode && (
                                       <input
                                         type="checkbox"
                                         checked={selectedShiftIds.has(s.id)}
                                         onChange={() => toggleShiftSelection(s.id)}
                                       />
-                                    </td>
-                                  )}
+                                    )}
+                                  </td>
                                   <td>{s.userName || s.user_name}</td>
                                   <td>{formatDate(s.date)}</td>
                                   <td>{formatTime(s.clock_in_time)}</td>
@@ -3904,12 +3900,20 @@ function TimeClock() {
                                       <span className={`status-badge ${s.status}`}>{s.status.replace('_', ' ')}</span>
                                     )}
                                   </td>
-                                  {!shiftsSelectMode && (
-                                    <td className="action-cell" onClick={e => e.stopPropagation()}>
-                                      <button className="btn-edit-small" onClick={() => setEditingShift({...s})}>Edit</button>
-                                      <button className="btn-delete-small" onClick={() => setDeleteConfirm({ type: 'shift', id: s.id })}>Delete</button>
-                                    </td>
-                                  )}
+                                  <td className="action-cell" onClick={e => e.stopPropagation()}>
+                                    <button className="btn-icon" title="Edit" onClick={() => setEditingShift({...s})}>
+                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                                      </svg>
+                                    </button>
+                                    <button className="btn-icon danger" title="Delete" onClick={() => setDeleteConfirm({ type: 'shift', id: s.id })}>
+                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <polyline points="3 6 5 6 21 6"></polyline>
+                                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                      </svg>
+                                    </button>
+                                  </td>
                                 </tr>
                               ))}
                             </tbody>
@@ -3930,7 +3934,6 @@ function TimeClock() {
                   </div>
                 )}
               </div>
-            )
           )}
 
           {/* Pending Approval Sub-Tab */}
