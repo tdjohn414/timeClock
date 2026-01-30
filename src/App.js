@@ -3658,8 +3658,8 @@ function TimeClock() {
                           const seenShiftIds = new Set();
 
                           for (const activity of activities) {
-                            // Skip approval entries - we use shift_status instead
-                            if (activity.action === 'shift_approved') continue;
+                            // Skip approval/rejection entries - we use shift_status instead
+                            if (activity.action === 'shift_approved' || activity.action === 'shift_rejected') continue;
 
                             // For shift submissions, check shift's current status
                             if ((activity.action === 'shift_submitted' || activity.action === 'shift_created') && activity.target_id) {
@@ -3669,10 +3669,13 @@ function TimeClock() {
 
                               // Use the actual shift status from the database
                               const isApproved = activity.shift_status === 'approved' || activity.shift_status === 'paid';
+                              const isRejected = activity.shift_status === 'rejected';
                               consolidated.push({
                                 ...activity,
                                 isApproved,
-                                approvalTime: activity.approval_timestamp
+                                isRejected,
+                                approvalTime: activity.approval_timestamp,
+                                rejectionTime: activity.rejection_timestamp
                               });
                             } else {
                               // Non-shift activities pass through unchanged
@@ -3709,6 +3712,7 @@ function TimeClock() {
                             // Determine activity status class
                             const getActivityClass = () => {
                               if (activity.isApproved) return 'activity-approved';
+                              if (activity.isRejected) return 'activity-rejected';
                               if (activity.action === 'shift_submitted' || activity.action === 'shift_created') {
                                 return 'activity-pending';
                               }
@@ -3716,10 +3720,22 @@ function TimeClock() {
                             };
 
                             const formatAction = () => {
-                              // Format clock times if available
+                              // Format clock times with date included
+                              const shiftDate = activity.details?.date;
                               const clockIn = activity.details?.clockIn ? formatTime(activity.details.clockIn) : null;
                               const clockOut = activity.details?.clockOut ? formatTime(activity.details.clockOut) : null;
-                              const timeRange = clockIn && clockOut ? ` (${clockIn} - ${clockOut})` : '';
+
+                              // Build time range with date: "(1/29/26 8:20 PM - 8:50 PM)"
+                              let timeRange = '';
+                              if (clockIn && clockOut && shiftDate) {
+                                const dateStr = String(shiftDate);
+                                const dateOnly = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+                                const d = new Date(dateOnly + 'T12:00:00');
+                                const formattedDate = d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' });
+                                timeRange = ` (${formattedDate} ${clockIn} - ${clockOut})`;
+                              } else if (clockIn && clockOut) {
+                                timeRange = ` (${clockIn} - ${clockOut})`;
+                              }
 
                               switch (activity.action) {
                                 case 'user_created':
@@ -3739,11 +3755,16 @@ function TimeClock() {
                                     <>
                                       {isSubmit
                                         ? <><strong>{targetName}</strong> submitted shift{timeRange}</>
-                                        : <><strong>{adminName}</strong> created shift for <strong>{targetName}</strong></>
+                                        : <><strong>{adminName}</strong> created shift for <strong>{targetName}</strong>{timeRange}</>
                                       }
                                       {activity.isApproved && (
                                         <span className="approval-timestamp">
                                           Approved {activity.approvalTime ? formatActivityTime(activity.approvalTime) : ''}
+                                        </span>
+                                      )}
+                                      {activity.isRejected && (
+                                        <span className="rejection-timestamp">
+                                          Rejected {activity.rejectionTime ? formatActivityTime(activity.rejectionTime) : ''}
                                         </span>
                                       )}
                                     </>
@@ -3759,20 +3780,6 @@ function TimeClock() {
                                 default:
                                   return <><strong>{adminName}</strong> {activity.action.replace(/_/g, ' ')} <strong>{targetName}</strong></>;
                               }
-                            };
-
-                            // Format shift date for display
-                            const getShiftDateDisplay = () => {
-                              const shiftDate = activity.details?.date || activity.details?.shiftDate;
-                              if (shiftDate) {
-                                // Handle both "YYYY-MM-DD" and ISO "YYYY-MM-DDTHH:MM:SS" formats
-                                const dateStr = String(shiftDate);
-                                const dateOnly = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
-                                const d = new Date(dateOnly + 'T12:00:00');
-                                if (isNaN(d.getTime())) return null;
-                                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                              }
-                              return null;
                             };
 
                             // Check if this activity links to a shift
@@ -3791,12 +3798,7 @@ function TimeClock() {
                                 onClick={handleActivityClick}
                                 style={isShiftActivity ? { cursor: 'pointer' } : {}}
                               >
-                                <span className="activity-description">
-                                  {formatAction()}
-                                  {getShiftDateDisplay() && (
-                                    <span className="activity-shift-date"> ({getShiftDateDisplay()})</span>
-                                  )}
-                                </span>
+                                <span className="activity-description">{formatAction()}</span>
                                 <span className="activity-time">{formatActivityTime(activity.created_at)}</span>
                               </div>
                             );
@@ -4460,9 +4462,23 @@ function TimeClock() {
                     {activityData.activity?.map((activity, i) => {
                       const targetName = activity.target_name || 'Unknown';
                       const adminName = activity.admin_name || 'Admin';
+
+                      // Format clock times with date included
+                      const shiftDate = activity.details?.date;
                       const clockIn = activity.details?.clockIn ? formatTime(activity.details.clockIn) : null;
                       const clockOut = activity.details?.clockOut ? formatTime(activity.details.clockOut) : null;
-                      const timeRange = clockIn && clockOut ? ` (${clockIn} - ${clockOut})` : '';
+
+                      // Build time range with date: "(1/29/26 8:20 PM - 8:50 PM)"
+                      let timeRange = '';
+                      if (clockIn && clockOut && shiftDate) {
+                        const dateStr = String(shiftDate);
+                        const dateOnly = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+                        const d = new Date(dateOnly + 'T12:00:00');
+                        const formattedDate = d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' });
+                        timeRange = ` (${formattedDate} ${clockIn} - ${clockOut})`;
+                      } else if (clockIn && clockOut) {
+                        timeRange = ` (${clockIn} - ${clockOut})`;
+                      }
 
                       // Determine activity status class
                       const getActivityClass = () => {
@@ -4471,6 +4487,9 @@ function TimeClock() {
                         }
                         if (activity.action === 'shift_approved') {
                           return 'activity-approved';
+                        }
+                        if (activity.action === 'shift_rejected') {
+                          return 'activity-rejected';
                         }
                         return '';
                       };
@@ -4513,16 +4532,21 @@ function TimeClock() {
                           case 'shift_created':
                             return activity.details?.selfService
                               ? <><strong>{targetName}</strong> submitted shift{timeRange}</>
-                              : <><strong>{adminName}</strong> created shift for <strong>{targetName}</strong></>;
+                              : <><strong>{adminName}</strong> created shift for <strong>{targetName}</strong>{timeRange}</>;
                           case 'shift_approved':
                             return (
                               <>
-                                <strong>{adminName}</strong> approved <strong>{targetName}'s</strong> shift
+                                <strong>{adminName}</strong> approved <strong>{targetName}'s</strong> shift{timeRange}
                                 <span className="approval-timestamp">Approved {formatActivityTime(activity.created_at)}</span>
                               </>
                             );
                           case 'shift_rejected':
-                            return <><strong>{adminName}</strong> rejected <strong>{targetName}'s</strong> shift</>;
+                            return (
+                              <>
+                                <strong>{adminName}</strong> rejected <strong>{targetName}'s</strong> shift{timeRange}
+                                <span className="rejection-timestamp">Rejected {formatActivityTime(activity.created_at)}</span>
+                              </>
+                            );
                           case 'shift_updated':
                             return <><strong>{adminName}</strong> edited <strong>{targetName}'s</strong> shift</>;
                           case 'shift_deleted':
@@ -4532,20 +4556,6 @@ function TimeClock() {
                           default:
                             return <><strong>{adminName}</strong> {activity.action.replace(/_/g, ' ')} <strong>{targetName}</strong></>;
                         }
-                      };
-
-                      // Format shift date for display
-                      const getShiftDateDisplay = () => {
-                        const shiftDate = activity.details?.date || activity.details?.shiftDate;
-                        if (shiftDate) {
-                          // Handle both "YYYY-MM-DD" and ISO "YYYY-MM-DDTHH:MM:SS" formats
-                          const dateStr = String(shiftDate);
-                          const dateOnly = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
-                          const d = new Date(dateOnly + 'T12:00:00');
-                          if (isNaN(d.getTime())) return null;
-                          return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                        }
-                        return null;
                       };
 
                       // Check if this activity links to a shift
@@ -4564,12 +4574,7 @@ function TimeClock() {
                           onClick={handleActivityClick}
                           style={isShiftActivity ? { cursor: 'pointer' } : {}}
                         >
-                          <span className="activity-description">
-                            {formatAction()}
-                            {getShiftDateDisplay() && (
-                              <span className="activity-shift-date"> ({getShiftDateDisplay()})</span>
-                            )}
-                          </span>
+                          <span className="activity-description">{formatAction()}</span>
                           <span className="activity-time">{formatActivityTime(activity.created_at)}</span>
                         </div>
                       );
@@ -4717,7 +4722,7 @@ function TimeClock() {
       {/* Employee Edit Shift Modal */}
       {employeeEditingShift && (
         <div className="modal-overlay" onClick={() => setEmployeeEditingShift(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+          <div className="modal employee-edit-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Edit Shift</h2>
               <button className="modal-close" onClick={() => setEmployeeEditingShift(null)}>&times;</button>
@@ -4728,38 +4733,129 @@ function TimeClock() {
                   This shift was rejected. Make your corrections and save to resubmit for approval.
                 </p>
               )}
-              <div className="form-field">
-                <label>Date</label>
-                <input
-                  type="date"
-                  value={employeeEditingShift.date?.split('T')[0] || employeeEditingShift.date || ''}
-                  onChange={e => setEmployeeEditingShift({...employeeEditingShift, date: e.target.value})}
-                />
+              <div className="form-row">
+                <div className="form-field">
+                  <label>Date</label>
+                  <input
+                    type="date"
+                    value={employeeEditingShift.date?.split('T')[0] || employeeEditingShift.date || ''}
+                    onChange={e => setEmployeeEditingShift({...employeeEditingShift, date: e.target.value})}
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Total Hours</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={employeeEditingShift.totalHours || ''}
+                    onChange={e => setEmployeeEditingShift({...employeeEditingShift, totalHours: e.target.value})}
+                  />
+                </div>
               </div>
-              <div className="form-field">
-                <label>Clock In</label>
-                <input
-                  type="time"
-                  value={employeeEditingShift.clockInTime?.substring(0,5) || ''}
-                  onChange={e => setEmployeeEditingShift({...employeeEditingShift, clockInTime: e.target.value})}
-                />
+              <div className="form-row">
+                <div className="form-field">
+                  <label>Clock In</label>
+                  <input
+                    type="time"
+                    value={employeeEditingShift.clockInTime?.substring(0,5) || ''}
+                    onChange={e => setEmployeeEditingShift({...employeeEditingShift, clockInTime: e.target.value})}
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Clock Out</label>
+                  <input
+                    type="time"
+                    value={employeeEditingShift.clockOutTime?.substring(0,5) || ''}
+                    onChange={e => setEmployeeEditingShift({...employeeEditingShift, clockOutTime: e.target.value})}
+                  />
+                </div>
               </div>
-              <div className="form-field">
-                <label>Clock Out</label>
-                <input
-                  type="time"
-                  value={employeeEditingShift.clockOutTime?.substring(0,5) || ''}
-                  onChange={e => setEmployeeEditingShift({...employeeEditingShift, clockOutTime: e.target.value})}
-                />
-              </div>
-              <div className="form-field">
-                <label>Total Hours</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={employeeEditingShift.totalHours || ''}
-                  onChange={e => setEmployeeEditingShift({...employeeEditingShift, totalHours: e.target.value})}
-                />
+
+              {/* Time Blocks Section */}
+              <div className="time-blocks-section">
+                <div className="time-blocks-header">
+                  <h3>Time Blocks</h3>
+                  <button
+                    type="button"
+                    className="btn-add-block"
+                    onClick={() => {
+                      const newBlock = {
+                        id: Date.now(),
+                        startTime: employeeEditingShift.clockInTime?.substring(0,5) || '08:00',
+                        endTime: employeeEditingShift.clockOutTime?.substring(0,5) || '17:00',
+                        tasks: '',
+                        isBreak: false
+                      };
+                      setEmployeeEditingShift({
+                        ...employeeEditingShift,
+                        timeBlocks: [...(employeeEditingShift.timeBlocks || []), newBlock]
+                      });
+                    }}
+                  >
+                    + Add Block
+                  </button>
+                </div>
+                <div className="time-blocks-list">
+                  {(employeeEditingShift.timeBlocks || []).map((block, idx) => (
+                    <div key={block.id || idx} className={`time-block-item ${block.isBreak ? 'break-block' : ''}`}>
+                      <div className="block-row">
+                        <input
+                          type="time"
+                          value={block.startTime?.substring(0,5) || ''}
+                          onChange={e => {
+                            const updated = [...employeeEditingShift.timeBlocks];
+                            updated[idx] = { ...updated[idx], startTime: e.target.value };
+                            setEmployeeEditingShift({ ...employeeEditingShift, timeBlocks: updated });
+                          }}
+                        />
+                        <span className="block-separator">-</span>
+                        <input
+                          type="time"
+                          value={block.endTime?.substring(0,5) || ''}
+                          onChange={e => {
+                            const updated = [...employeeEditingShift.timeBlocks];
+                            updated[idx] = { ...updated[idx], endTime: e.target.value };
+                            setEmployeeEditingShift({ ...employeeEditingShift, timeBlocks: updated });
+                          }}
+                        />
+                        <label className="break-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={block.isBreak || false}
+                            onChange={e => {
+                              const updated = [...employeeEditingShift.timeBlocks];
+                              updated[idx] = { ...updated[idx], isBreak: e.target.checked };
+                              setEmployeeEditingShift({ ...employeeEditingShift, timeBlocks: updated });
+                            }}
+                          />
+                          Break
+                        </label>
+                        <button
+                          type="button"
+                          className="btn-delete-block"
+                          onClick={() => {
+                            const updated = employeeEditingShift.timeBlocks.filter((_, i) => i !== idx);
+                            setEmployeeEditingShift({ ...employeeEditingShift, timeBlocks: updated });
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <textarea
+                        placeholder="Tasks / notes for this time block..."
+                        value={block.tasks || ''}
+                        onChange={e => {
+                          const updated = [...employeeEditingShift.timeBlocks];
+                          updated[idx] = { ...updated[idx], tasks: e.target.value };
+                          setEmployeeEditingShift({ ...employeeEditingShift, timeBlocks: updated });
+                        }}
+                      />
+                    </div>
+                  ))}
+                  {(!employeeEditingShift.timeBlocks || employeeEditingShift.timeBlocks.length === 0) && (
+                    <p className="empty-text">No time blocks. Click "Add Block" to add tasks.</p>
+                  )}
+                </div>
               </div>
             </div>
             <div className="modal-footer">

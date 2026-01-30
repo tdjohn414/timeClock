@@ -1388,6 +1388,143 @@
   cursor: not-allowed;
 }
 
+/* Employee Edit Modal */
+.employee-edit-modal {
+  max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.employee-edit-modal .form-row {
+  display: flex;
+  gap: 16px;
+}
+
+.employee-edit-modal .form-row .form-field {
+  flex: 1;
+}
+
+.employee-edit-modal .time-blocks-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.employee-edit-modal .time-blocks-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.employee-edit-modal .time-blocks-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #374151;
+}
+
+.employee-edit-modal .btn-add-block {
+  background: #3b82f6;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.employee-edit-modal .btn-add-block:hover {
+  background: #2563eb;
+}
+
+.employee-edit-modal .time-blocks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.employee-edit-modal .time-block-item {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.employee-edit-modal .time-block-item.break-block {
+  background: #fef3c7;
+  border-color: #fbbf24;
+}
+
+.employee-edit-modal .block-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.employee-edit-modal .block-row input[type="time"] {
+  width: 110px;
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.employee-edit-modal .block-separator {
+  color: #6b7280;
+}
+
+.employee-edit-modal .break-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: #6b7280;
+  margin-left: auto;
+}
+
+.employee-edit-modal .break-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+
+.employee-edit-modal .btn-delete-block {
+  background: transparent;
+  border: 1px solid #ef4444;
+  color: #ef4444;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+}
+
+.employee-edit-modal .btn-delete-block:hover {
+  background: #ef4444;
+  color: white;
+}
+
+.employee-edit-modal .time-block-item textarea {
+  width: 100%;
+  min-height: 60px;
+  padding: 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.employee-edit-modal .empty-text {
+  text-align: center;
+  color: #9ca3af;
+  font-size: 0.9rem;
+  padding: 16px;
+}
+
 /* Time Increment Buttons */
 .time-increment-btns {
   display: flex;
@@ -2033,6 +2170,19 @@
   display: block;
   font-size: 0.8rem;
   color: #1f2937;
+  font-weight: 500;
+  margin-top: 4px;
+}
+
+.activity-item.activity-rejected {
+  border-left-color: #ef4444;
+  background: #fef2f2;
+}
+
+.rejection-timestamp {
+  display: block;
+  font-size: 0.8rem;
+  color: #dc2626;
   font-weight: 500;
   margin-top: 4px;
 }
@@ -3928,6 +4078,11 @@
 .activity-item.activity-approved {
   border-left-color: #22c55e !important;
   background: #f0fdf4 !important;
+}
+
+.activity-item.activity-rejected {
+  border-left-color: #ef4444 !important;
+  background: #fef2f2 !important;
 }
 
 /* Clickable activity items */
