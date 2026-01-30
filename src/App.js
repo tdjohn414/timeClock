@@ -148,6 +148,7 @@ function TimeClock() {
 
   // Admin Panel Redesign State
   const [pendingShifts, setPendingShifts] = useState([]);
+  const [approvedShifts, setApprovedShifts] = useState([]);
   const [pendingShiftsLoading, setPendingShiftsLoading] = useState(false);
   const [selectedPendingShifts, setSelectedPendingShifts] = useState(new Set());
   const [rejectModalShift, setRejectModalShift] = useState(null);
@@ -363,15 +364,19 @@ function TimeClock() {
     }
   };
 
-  // Load pending shifts for approval
+  // Load pending and approved shifts
   const loadPendingShifts = async () => {
     setPendingShiftsLoading(true);
     try {
-      const data = await adminAPI.getPendingShifts();
-      setPendingShifts(data.shifts || []);
+      const [pendingData, approvedData] = await Promise.all([
+        adminAPI.getPendingShifts(),
+        adminAPI.getShifts({ status: 'approved', limit: 3 })
+      ]);
+      setPendingShifts(pendingData.shifts || []);
+      setApprovedShifts(approvedData.shifts || []);
     } catch (err) {
-      console.error('Failed to load pending shifts:', err);
-      setAdminToast({ type: 'error', message: 'Failed to load pending shifts' });
+      console.error('Failed to load shifts:', err);
+      setAdminToast({ type: 'error', message: 'Failed to load shifts' });
     } finally {
       setPendingShiftsLoading(false);
     }
@@ -381,9 +386,16 @@ function TimeClock() {
   const loadWeeklyView = async (weekStart = null) => {
     setWeeklyViewLoading(true);
     try {
-      const data = await adminAPI.getWeeklyView(weekStart);
+      // Load weekly view data and available weeks in parallel
+      const [data, weeksData] = await Promise.all([
+        adminAPI.getWeeklyView(weekStart),
+        availableWeeks.length === 0 ? adminAPI.getAvailableWeeks() : Promise.resolve({ weeks: availableWeeks })
+      ]);
       setWeeklyViewData(data);
       setCurrentWeekStart(data.weekStart);
+      if (weeksData.weeks) {
+        setAvailableWeeks(weeksData.weeks);
+      }
     } catch (err) {
       console.error('Failed to load weekly view:', err);
       setAdminToast({ type: 'error', message: 'Failed to load weekly view' });
@@ -4017,6 +4029,35 @@ function TimeClock() {
                   ))}
                 </div>
               )}
+
+              {/* Approved Shifts Section */}
+              <div className="approved-shifts-section">
+                <h3>Recently Approved</h3>
+                {approvedShifts.length === 0 ? (
+                  <p className="no-approved">No recently approved shifts</p>
+                ) : (
+                  <div className="approved-shifts-list">
+                    {approvedShifts.map(shift => (
+                      <div
+                        key={shift.id}
+                        className="approved-shift-row"
+                        onClick={() => viewShiftDetails(shift.id)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <div className="approved-shift-info">
+                          <strong>{shift.user_name}</strong>
+                          <span className="shift-date">{new Date(shift.date + 'T00:00:00').toLocaleDateString()}</span>
+                        </div>
+                        <div className="approved-shift-times">
+                          <span>{formatTime(shift.clockInTime || shift.clock_in_time)} - {formatTime(shift.clockOutTime || shift.clock_out_time)}</span>
+                          <span className="hours">{shift.totalHours || shift.total_hours} hrs</span>
+                        </div>
+                        <span className="status-badge approved">Approved</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -4095,7 +4136,35 @@ function TimeClock() {
                           }
                           setShowWeeksSidebar(!showWeeksSidebar);
                         }}>📅 Weeks</button>
-                        <h3>{weeklyViewData?.weekDisplay || 'Loading...'}</h3>
+                        <div className="week-nav-controls">
+                          {/* Previous (older) week arrow - weeks are sorted DESC so older = higher index */}
+                          {availableWeeks.length > 0 && (() => {
+                            const currentIdx = availableWeeks.findIndex(w => w.weekStart === currentWeekStart);
+                            return currentIdx >= 0 && currentIdx < availableWeeks.length - 1 ? (
+                              <button
+                                className="btn-week-arrow"
+                                onClick={() => loadWeeklyView(availableWeeks[currentIdx + 1].weekStart)}
+                                title="Previous week"
+                              >
+                                ◀
+                              </button>
+                            ) : null;
+                          })()}
+                          <h3>{weeklyViewData?.weekDisplay || 'Loading...'}</h3>
+                          {/* Next (newer) week arrow */}
+                          {availableWeeks.length > 0 && (() => {
+                            const currentIdx = availableWeeks.findIndex(w => w.weekStart === currentWeekStart);
+                            return currentIdx > 0 ? (
+                              <button
+                                className="btn-week-arrow"
+                                onClick={() => loadWeeklyView(availableWeeks[currentIdx - 1].weekStart)}
+                                title="Next week"
+                              >
+                                ▶
+                              </button>
+                            ) : null;
+                          })()}
+                        </div>
                       </div>
 
                   {/* Mobile View Mode Toggle */}

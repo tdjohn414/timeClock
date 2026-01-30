@@ -3990,6 +3990,74 @@
   max-width: 300px;
 }
 
+/* Approved Shifts Section */
+.approved-shifts-section {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.approved-shifts-section h3 {
+  margin: 0 0 16px 0;
+  color: #1e293b;
+  font-size: 1.1rem;
+}
+
+.no-approved {
+  color: #64748b;
+  font-style: italic;
+}
+
+.approved-shifts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.approved-shift-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.approved-shift-row:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.approved-shift-info {
+  flex: 1;
+  min-width: 150px;
+}
+
+.approved-shift-info strong {
+  display: block;
+  color: #1e293b;
+}
+
+.approved-shift-info .shift-date {
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.approved-shift-times {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  color: #475569;
+}
+
+.approved-shift-times .hours {
+  font-weight: 600;
+  color: #22c55e;
+}
+
 /* Loading Spinner */
 .loading-spinner-container {
   display: flex;
@@ -4034,8 +4102,30 @@
 
 .weekly-header h3 {
   margin: 0;
-  flex: 1;
   text-align: center;
+}
+
+.week-nav-controls {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.btn-week-arrow {
+  background: #e2e8f0;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: #334155;
+  transition: background 0.15s;
+}
+
+.btn-week-arrow:hover {
+  background: #cbd5e1;
 }
 
 .btn-week-nav {
