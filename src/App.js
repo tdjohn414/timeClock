@@ -1,9 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { io } from 'socket.io-client';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { shiftsAPI, authAPI, adminAPI, notificationsAPI, localTimeToUTC } from './services/api';
 import Login from './components/Login';
 import Register from './components/Register';
 import './App.css';
+
+// WebSocket URL (same as API but for socket.io)
+const SOCKET_URL = process.env.REACT_APP_API_URL?.replace('/api', '') || 'http://localhost:3001';
 
 // Hardcoded admin email
 const ADMIN_EMAIL = 'tyler@fullscopeestimating.com';
@@ -56,6 +60,7 @@ function TimeClock() {
   // Admin Panel State
   const [adminSubTab, setAdminSubTab] = useState('dashboard');
   const [dashboardData, setDashboardData] = useState(null);
+  const [pendingCount, setPendingCount] = useState(0);
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminUsersLoading, setAdminUsersLoading] = useState(false);
   const [adminUsersPagination, setAdminUsersPagination] = useState({ page: 1, limit: 25, total: 0 });
@@ -151,6 +156,7 @@ function TimeClock() {
   const [approvedShifts, setApprovedShifts] = useState([]);
   const [pendingShiftsLoading, setPendingShiftsLoading] = useState(false);
   const [selectedPendingShifts, setSelectedPendingShifts] = useState(new Set());
+  const [expandedPendingShifts, setExpandedPendingShifts] = useState(new Set());
   const [rejectModalShift, setRejectModalShift] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
 
@@ -246,6 +252,37 @@ function TimeClock() {
     }
   }, [activeTab, adminSubTab, isAdmin]);
 
+  // WebSocket connection for real-time badge updates
+  useEffect(() => {
+    if (isAdmin && user) {
+      // Load initial count
+      refreshPendingCount();
+
+      // Connect to WebSocket
+      const socket = io(SOCKET_URL, {
+        transports: ['websocket', 'polling']
+      });
+
+      socket.on('connect', () => {
+        console.log('WebSocket connected');
+        socket.emit('join-admin');
+      });
+
+      socket.on('pending-count', (count) => {
+        console.log('Received pending count:', count);
+        setPendingCount(count);
+      });
+
+      socket.on('disconnect', () => {
+        console.log('WebSocket disconnected');
+      });
+
+      return () => {
+        socket.disconnect();
+      };
+    }
+  }, [isAdmin, user]);
+
   // Auto-dismiss admin toast after 3 seconds for all messages
   useEffect(() => {
     if (adminToast) {
@@ -292,11 +329,22 @@ function TimeClock() {
     try {
       const data = await adminAPI.getDashboard();
       setDashboardData(data);
+      setPendingCount(data.pendingApprovalCount || 0);
     } catch (err) {
       console.error('Failed to load dashboard:', err);
       setAdminToast({ type: 'error', message: 'Failed to load dashboard' });
     } finally {
       setAdminLoading(false);
+    }
+  };
+
+  // Fetch just the pending count (lightweight)
+  const refreshPendingCount = async () => {
+    try {
+      const data = await adminAPI.getDashboard();
+      setPendingCount(data.pendingApprovalCount || 0);
+    } catch (err) {
+      // Silently fail - this is just a background refresh
     }
   };
 
@@ -3247,8 +3295,8 @@ function TimeClock() {
                 <button className={`admin-nav-item ${adminSubTab === 'pending' ? 'active' : ''}`} onClick={() => { setViewingShift(null); setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('pending'); loadPendingShifts(); }}>
                   <span className="nav-icon">⏳</span>
                   <span className="nav-label">Pending Approval</span>
-                  {dashboardData?.pendingApprovalCount > 0 && (
-                    <span className="nav-badge">{dashboardData.pendingApprovalCount}</span>
+                  {pendingCount > 0 && (
+                    <span className="nav-badge">{pendingCount}</span>
                   )}
                 </button>
                 <button className={`admin-nav-item ${adminSubTab === 'weekly' ? 'active' : ''}`} onClick={() => { setViewingShift(null); setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('weekly'); loadWeeklyView(); }}>
@@ -3325,6 +3373,24 @@ function TimeClock() {
                     <span className="detail-value">#{viewingShift.id}</span>
                   </div>
                 </div>
+
+                {/* Approve/Reject buttons for pending shifts */}
+                {viewingShift.status === 'pending_approval' && (
+                  <div className="shift-approval-actions">
+                    <button className="btn-approve-large" onClick={() => {
+                      handleApproveShift(viewingShift.id);
+                      setViewingShift(null);
+                    }}>
+                      ✓ Approve Shift
+                    </button>
+                    <button className="btn-reject-large" onClick={() => {
+                      setRejectModalShift(viewingShift);
+                      setRejectReason('');
+                    }}>
+                      ✕ Reject Shift
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Column 2: Time Blocks */}
@@ -3644,14 +3710,45 @@ function TimeClock() {
                                   return <><strong>{adminName}</strong> edited <strong>{targetName}'s</strong> shift</>;
                                 case 'shift_deleted':
                                   return <><strong>{adminName}</strong> deleted <strong>{targetName}'s</strong> shift</>;
+                                case 'shift_marked_paid':
+                                  return <><strong>{adminName}</strong> marked <strong>{targetName}'s</strong> shift as paid</>;
                                 default:
                                   return <><strong>{adminName}</strong> {activity.action.replace(/_/g, ' ')} <strong>{targetName}</strong></>;
                               }
                             };
 
+                            // Format shift date for display
+                            const getShiftDateDisplay = () => {
+                              const shiftDate = activity.details?.date || activity.details?.shiftDate;
+                              if (shiftDate) {
+                                const d = new Date(shiftDate + 'T12:00:00');
+                                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                              }
+                              return null;
+                            };
+
+                            // Check if this activity links to a shift
+                            const isShiftActivity = activity.target_type === 'shift' && activity.target_id && activity.action !== 'shift_deleted';
+
+                            const handleActivityClick = () => {
+                              if (isShiftActivity) {
+                                viewShiftDetails(activity.target_id);
+                              }
+                            };
+
                             return (
-                              <div key={i} className={`activity-item ${getActivityClass()}`}>
-                                <span className="activity-description">{formatAction()}</span>
+                              <div
+                                key={i}
+                                className={`activity-item ${getActivityClass()} ${isShiftActivity ? 'clickable' : ''}`}
+                                onClick={handleActivityClick}
+                                style={isShiftActivity ? { cursor: 'pointer' } : {}}
+                              >
+                                <span className="activity-description">
+                                  {formatAction()}
+                                  {getShiftDateDisplay() && (
+                                    <span className="activity-shift-date"> ({getShiftDateDisplay()})</span>
+                                  )}
+                                </span>
                                 <span className="activity-time">{formatActivityTime(activity.created_at)}</span>
                               </div>
                             );
@@ -3707,9 +3804,19 @@ function TimeClock() {
                             <td><span className={`status-badge ${u.status}`}>{u.status}</span></td>
                             <td>{new Date(u.created_at).toLocaleDateString()}</td>
                             <td className="action-cell" onClick={e => e.stopPropagation()}>
-                              <button className="btn-edit-small" onClick={() => setEditingUser({...u})}>Edit</button>
+                              <button className="btn-icon" onClick={() => setEditingUser({...u})} title="Edit user">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                                </svg>
+                              </button>
                               {u.id !== user.id && (
-                                <button className="btn-delete-small" onClick={() => setDeleteConfirm({ type: 'user', id: u.id })}>Deactivate</button>
+                                <button className="btn-icon danger" onClick={() => setDeleteConfirm({ type: 'user', id: u.id })} title="Deactivate user">
+                                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <polyline points="3 6 5 6 21 6"></polyline>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                  </svg>
+                                </button>
                               )}
                             </td>
                           </tr>
@@ -3987,7 +4094,7 @@ function TimeClock() {
                   {pendingShifts.map(shift => (
                     <div key={shift.id} className="pending-shift-card">
                       <div className="pending-shift-header">
-                        <label className="checkbox-label">
+                        <label className="checkbox-label" onClick={e => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={selectedPendingShifts.has(shift.id)}
@@ -4002,7 +4109,7 @@ function TimeClock() {
                             }}
                           />
                         </label>
-                        <div className="pending-shift-info">
+                        <div className="pending-shift-info clickable" onClick={() => viewShiftDetails(shift.id)}>
                           <strong>{shift.user_name}</strong>
                           <span className="shift-date">{new Date(shift.date + 'T00:00:00').toLocaleDateString()}</span>
                         </div>
@@ -4010,14 +4117,29 @@ function TimeClock() {
                           <span>{formatTime(shift.clockInTime || shift.clock_in_time)} - {formatTime(shift.clockOutTime || shift.clock_out_time)}</span>
                           <span className="hours">{shift.totalHours || shift.total_hours} hrs</span>
                         </div>
+                        {shift.timeBlocks && shift.timeBlocks.length > 0 && (
+                          <button
+                            className="btn-expand-blocks"
+                            onClick={() => {
+                              const newSet = new Set(expandedPendingShifts);
+                              if (newSet.has(shift.id)) {
+                                newSet.delete(shift.id);
+                              } else {
+                                newSet.add(shift.id);
+                              }
+                              setExpandedPendingShifts(newSet);
+                            }}
+                          >
+                            {expandedPendingShifts.has(shift.id) ? '▼' : '▶'} {shift.timeBlocks.length} blocks
+                          </button>
+                        )}
                         <div className="pending-shift-actions">
-                          <button className="btn-approve" onClick={() => handleApproveShift(shift.id)}>Approve</button>
-                          <button className="btn-reject" onClick={() => { setRejectModalShift(shift); setRejectReason(''); }}>Reject</button>
+                          <button className="btn-approve" onClick={() => handleApproveShift(shift.id)}>✓</button>
+                          <button className="btn-reject" onClick={() => { setRejectModalShift(shift); setRejectReason(''); }}>✕</button>
                         </div>
                       </div>
-                      {shift.timeBlocks && shift.timeBlocks.length > 0 && (
+                      {expandedPendingShifts.has(shift.id) && shift.timeBlocks && shift.timeBlocks.length > 0 && (
                         <div className="pending-shift-blocks">
-                          <small>Time Blocks:</small>
                           {shift.timeBlocks.map((block, idx) => (
                             <div key={idx} className={`mini-block ${block.isBreak || block.is_break ? 'break' : ''}`}>
                               <span>{formatTime(block.startTime || block.start_time)} - {formatTime(block.endTime || block.end_time)}</span>
@@ -4357,14 +4479,45 @@ function TimeClock() {
                             return <><strong>{adminName}</strong> edited <strong>{targetName}'s</strong> shift</>;
                           case 'shift_deleted':
                             return <><strong>{adminName}</strong> deleted <strong>{targetName}'s</strong> shift</>;
+                          case 'shift_marked_paid':
+                            return <><strong>{adminName}</strong> marked <strong>{targetName}'s</strong> shift as paid</>;
                           default:
                             return <><strong>{adminName}</strong> {activity.action.replace(/_/g, ' ')} <strong>{targetName}</strong></>;
                         }
                       };
 
+                      // Format shift date for display
+                      const getShiftDateDisplay = () => {
+                        const shiftDate = activity.details?.date || activity.details?.shiftDate;
+                        if (shiftDate) {
+                          const d = new Date(shiftDate + 'T12:00:00');
+                          return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                        }
+                        return null;
+                      };
+
+                      // Check if this activity links to a shift
+                      const isShiftActivity = activity.target_type === 'shift' && activity.target_id && activity.action !== 'shift_deleted';
+
+                      const handleActivityClick = () => {
+                        if (isShiftActivity) {
+                          viewShiftDetails(activity.target_id);
+                        }
+                      };
+
                       return (
-                        <div key={i} className={`activity-item ${getActivityClass()}`}>
-                          <span className="activity-description">{formatAction()}</span>
+                        <div
+                          key={i}
+                          className={`activity-item ${getActivityClass()} ${isShiftActivity ? 'clickable' : ''}`}
+                          onClick={handleActivityClick}
+                          style={isShiftActivity ? { cursor: 'pointer' } : {}}
+                        >
+                          <span className="activity-description">
+                            {formatAction()}
+                            {getShiftDateDisplay() && (
+                              <span className="activity-shift-date"> ({getShiftDateDisplay()})</span>
+                            )}
+                          </span>
                           <span className="activity-time">{formatActivityTime(activity.created_at)}</span>
                         </div>
                       );
