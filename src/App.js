@@ -34,6 +34,12 @@ function TimeClock() {
   const [adminUsersPagination, setAdminUsersPagination] = useState({ page: 1, limit: 25, total: 0 });
   const [adminShiftsPagination, setAdminShiftsPagination] = useState({ page: 1, limit: 25, total: 0 });
   const [adminShiftsFilters, setAdminShiftsFilters] = useState({ userId: '', startDate: '', endDate: '' });
+  // Week-grouped shifts for All Shifts view
+  const [shiftsWeeks, setShiftsWeeks] = useState([]);
+  const [shiftsWeeksLoading, setShiftsWeeksLoading] = useState(false);
+  const [shiftsWeeksOffset, setShiftsWeeksOffset] = useState(0);
+  const [shiftsWeeksHasMore, setShiftsWeeksHasMore] = useState(true);
+  const [shiftsEmployeeFilter, setShiftsEmployeeFilter] = useState('');
   const [editingShift, setEditingShift] = useState(null);
   const [viewingShift, setViewingShift] = useState(null);
   const [viewingShiftLoading, setViewingShiftLoading] = useState(false);
@@ -116,6 +122,8 @@ function TimeClock() {
   const [weeklyViewLoading, setWeeklyViewLoading] = useState(false);
   const [currentWeekStart, setCurrentWeekStart] = useState(null);
   const [weeklyViewMode, setWeeklyViewMode] = useState('calendar'); // 'list' or 'calendar'
+  const [showWeeksSidebar, setShowWeeksSidebar] = useState(false);
+  const [availableWeeks, setAvailableWeeks] = useState([]);
 
   // User Pay Weeks State
   const [viewingUserPayWeeks, setViewingUserPayWeeks] = useState(null);
@@ -130,6 +138,9 @@ function TimeClock() {
 
   // Admin clock-in toggle (hidden by default)
   const [showAdminClockIn, setShowAdminClockIn] = useState(false);
+
+  // Admin viewing as employee toggle
+  const [adminViewingAsEmployee, setAdminViewingAsEmployee] = useState(false);
 
   useEffect(() => {
     const loadShifts = async () => {
@@ -185,12 +196,15 @@ function TimeClock() {
         loadDashboard();
       } else if (adminSubTab === 'users' && adminUsers.length === 0) {
         loadAdminUsers();
-      } else if (adminSubTab === 'shifts' && adminShifts.length === 0) {
-        loadAdminShifts();
+      } else if (adminSubTab === 'shifts') {
+        if (shiftsWeeks.length === 0) loadShiftsByWeek(true);
+        if (adminUsers.length === 0) loadAdminUsers(); // For Create Shift modal
       } else if (adminSubTab === 'pending' && pendingShifts.length === 0) {
         loadPendingShifts();
       } else if (adminSubTab === 'weekly' && !weeklyViewData) {
         loadWeeklyView();
+      } else if (adminSubTab === 'activity' && !activityData.activity?.length) {
+        loadActivity();
       }
     }
   }, [activeTab, adminSubTab, isAdmin]);
@@ -249,6 +263,33 @@ function TimeClock() {
       setAdminToast({ type: 'error', message: 'Failed to load shifts' });
     } finally {
       setAdminLoading(false);
+    }
+  };
+
+  // Load shifts grouped by week for infinite scroll
+  const loadShiftsByWeek = async (reset = false) => {
+    if (shiftsWeeksLoading) return;
+    setShiftsWeeksLoading(true);
+    try {
+      const offset = reset ? 0 : shiftsWeeksOffset;
+      const params = { weeks: reset ? 2 : 1, offset };
+      if (shiftsEmployeeFilter) params.userId = shiftsEmployeeFilter;
+
+      const data = await adminAPI.getShiftsByWeek(params);
+
+      if (reset) {
+        setShiftsWeeks(data.weeks || []);
+        setShiftsWeeksOffset(data.nextOffset || 0);
+      } else {
+        setShiftsWeeks(prev => [...prev, ...(data.weeks || [])]);
+        setShiftsWeeksOffset(data.nextOffset ?? (shiftsWeeksOffset + 1));
+      }
+      setShiftsWeeksHasMore(data.hasMore);
+    } catch (err) {
+      console.error('Failed to load shifts by week:', err);
+      setAdminToast({ type: 'error', message: 'Failed to load shifts' });
+    } finally {
+      setShiftsWeeksLoading(false);
     }
   };
 
@@ -1983,6 +2024,10 @@ function TimeClock() {
 
       <header className="header">
         <div className="header-top">
+          <div className="header-logo">
+            <span className="logo-company">FULL SCOPE ESTIMATING</span>
+            <span className="logo-app">Time Clock</span>
+          </div>
           <div className="header-right">
             {/* Test Controls - Commented out for production
             <div className="test-controls">
@@ -2110,6 +2155,22 @@ function TimeClock() {
                     >
                       Change Email
                     </button>
+                    {isAdmin && (
+                      <button
+                        className="dropdown-item toggle-view-item"
+                        onClick={() => {
+                          setAdminViewingAsEmployee(!adminViewingAsEmployee);
+                          setShowUserDropdown(false);
+                          if (!adminViewingAsEmployee) {
+                            setActiveTab('today');
+                          } else {
+                            setActiveTab('admin');
+                          }
+                        }}
+                      >
+                        {adminViewingAsEmployee ? '← Back to Admin View' : 'View as Employee'}
+                      </button>
+                    )}
                     <button className="dropdown-item logout-item" onClick={logout}>
                       Logout
                     </button>
@@ -2121,8 +2182,8 @@ function TimeClock() {
         </div>
       </header>
 
-      {/* Tab Navigation - Only show for non-admin users */}
-      {!isAdmin && (
+      {/* Tab Navigation - Show for non-admin users OR admins viewing as employee */}
+      {(!isAdmin || adminViewingAsEmployee) && (
         <div className="tab-nav">
           <button
             className={`tab-btn ${activeTab === 'today' ? 'active' : ''}`}
@@ -2947,19 +3008,39 @@ function TimeClock() {
             </div>
           )}
 
-          {/* Admin Sub-Navigation */}
-          <div className="admin-sub-nav">
-            <button className={`admin-sub-tab ${adminSubTab === 'dashboard' ? 'active' : ''}`} onClick={() => setAdminSubTab('dashboard')}>Dashboard</button>
-            <button className={`admin-sub-tab ${adminSubTab === 'pending' ? 'active' : ''}`} onClick={() => { setAdminSubTab('pending'); loadPendingShifts(); }}>
-              Pending Approval
-              {dashboardData?.pendingApprovalCount > 0 && (
-                <span className="pending-badge">{dashboardData.pendingApprovalCount}</span>
-              )}
-            </button>
-            <button className={`admin-sub-tab ${adminSubTab === 'weekly' ? 'active' : ''}`} onClick={() => { setAdminSubTab('weekly'); loadWeeklyView(); }}>Weekly View</button>
-            <button className={`admin-sub-tab ${adminSubTab === 'users' ? 'active' : ''}`} onClick={() => setAdminSubTab('users')}>Users</button>
-            <button className={`admin-sub-tab ${adminSubTab === 'shifts' ? 'active' : ''}`} onClick={() => setAdminSubTab('shifts')}>All Shifts</button>
-          </div>
+          {/* Admin Layout with Sidebar */}
+          <div className="admin-layout">
+            {/* Sidebar Navigation */}
+            <aside className="admin-sidebar">
+              <nav className="admin-nav">
+                <button className={`admin-nav-item ${adminSubTab === 'dashboard' ? 'active' : ''}`} onClick={() => setAdminSubTab('dashboard')}>
+                  <span className="nav-icon">📊</span>
+                  <span className="nav-label">Dashboard</span>
+                </button>
+                <button className={`admin-nav-item ${adminSubTab === 'pending' ? 'active' : ''}`} onClick={() => { setAdminSubTab('pending'); loadPendingShifts(); }}>
+                  <span className="nav-icon">⏳</span>
+                  <span className="nav-label">Pending Approval</span>
+                  {dashboardData?.pendingApprovalCount > 0 && (
+                    <span className="nav-badge">{dashboardData.pendingApprovalCount}</span>
+                  )}
+                </button>
+                <button className={`admin-nav-item ${adminSubTab === 'weekly' ? 'active' : ''}`} onClick={() => { setAdminSubTab('weekly'); loadWeeklyView(); }}>
+                  <span className="nav-icon">📅</span>
+                  <span className="nav-label">Weekly View</span>
+                </button>
+                <button className={`admin-nav-item ${adminSubTab === 'users' ? 'active' : ''}`} onClick={() => setAdminSubTab('users')}>
+                  <span className="nav-icon">👥</span>
+                  <span className="nav-label">Employees</span>
+                </button>
+                <button className={`admin-nav-item ${adminSubTab === 'shifts' ? 'active' : ''}`} onClick={() => setAdminSubTab('shifts')}>
+                  <span className="nav-icon">🕐</span>
+                  <span className="nav-label">All Shifts</span>
+                </button>
+              </nav>
+            </aside>
+
+            {/* Main Content Area */}
+            <div className="admin-main">
 
           {/* Dashboard Sub-Tab */}
           {adminSubTab === 'dashboard' && (
@@ -2969,14 +3050,6 @@ function TimeClock() {
               ) : dashboardData ? (
                 <>
                   <div className="stats-grid">
-                    <div className="stat-card">
-                      <div className="stat-value">{dashboardData.totalUsers}</div>
-                      <div className="stat-label">Total Users</div>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-value">{dashboardData.activeUsers}</div>
-                      <div className="stat-label">Active This Week</div>
-                    </div>
                     <div className="stat-card">
                       <div className="stat-value">{dashboardData.hoursToday?.toFixed(1) || 0}</div>
                       <div className="stat-label">Hours Today</div>
@@ -2993,10 +3066,20 @@ function TimeClock() {
 
                   <div className="dashboard-sections">
                     <div className="dashboard-section">
-                      <h3>Top Employees This Week</h3>
+                      <h3 className="week-range">{(() => {
+                        // Calculate week bounds (Sunday to Saturday)
+                        const today = new Date();
+                        const day = today.getDay();
+                        const weekStart = new Date(today);
+                        weekStart.setDate(today.getDate() - day);
+                        const weekEnd = new Date(weekStart);
+                        weekEnd.setDate(weekStart.getDate() + 6);
+                        const formatD = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                        return `${formatD(weekStart)} - ${formatD(weekEnd)}`;
+                      })()}</h3>
                       <div className="top-employees-list">
                         {dashboardData.topEmployees?.slice(0, 5).map((emp, i) => (
-                          <div key={emp.id} className="top-employee">
+                          <div key={emp.id} className="top-employee" onClick={() => loadUserPayWeeks(emp.id)} style={{ cursor: 'pointer' }}>
                             <span className="rank">#{i + 1}</span>
                             <span className="name">{emp.name}</span>
                             <span className="hours">{emp.hours?.toFixed(1) || 0} hrs</span>
@@ -3006,81 +3089,136 @@ function TimeClock() {
                     </div>
 
                     <div className="dashboard-section">
-                      <h3>Recent Activity</h3>
+                      <div className="section-header-row">
+                        <h3>Recent Activity</h3>
+                        <span
+                          className="view-more-link"
+                          onClick={() => setAdminSubTab('activity')}
+                        >
+                          View More
+                        </span>
+                      </div>
                       <div className="activity-list">
-                        {dashboardData.recentActivity?.slice(0, 10).map((activity, i) => {
-                          const targetName = activity.target_name || 'Unknown';
-                          const adminName = activity.admin_name || 'Admin';
+                        {(() => {
+                          // Consolidate shift activities for Recent Activity widget
+                          // Uses shift_status from backend to determine if shift is approved
+                          const activities = dashboardData.recentActivity || [];
 
-                          const formatAction = () => {
-                            // Format clock times if available
-                            const clockIn = activity.details?.clockIn ? formatTime(activity.details.clockIn) : null;
-                            const clockOut = activity.details?.clockOut ? formatTime(activity.details.clockOut) : null;
-                            const timeRange = clockIn && clockOut ? ` (${clockIn} - ${clockOut})` : '';
+                          // Filter: only show submissions (not approvals), dedupe by shift
+                          const consolidated = [];
+                          const seenShiftIds = new Set();
 
-                            switch (activity.action) {
-                              case 'user_created':
-                                return <><strong>{adminName}</strong> added new employee <strong>{targetName}</strong></>;
-                              case 'user_updated':
-                                return <><strong>{adminName}</strong> updated <strong>{targetName}</strong></>;
-                              case 'user_deactivated':
-                                return <><strong>{adminName}</strong> deactivated <strong>{targetName}</strong></>;
-                              case 'user_activated':
-                                return <><strong>{adminName}</strong> reactivated <strong>{targetName}</strong></>;
-                              case 'user_password_reset':
-                                return <><strong>{adminName}</strong> reset password for <strong>{targetName}</strong></>;
-                              case 'shift_submitted':
-                                return <><strong>{targetName}</strong> submitted shift{timeRange}</>;
-                              case 'shift_created':
-                                return activity.details?.selfService
-                                  ? <><strong>{targetName}</strong> submitted shift{timeRange}</>
-                                  : <><strong>{adminName}</strong> created shift for <strong>{targetName}</strong></>;
-                              case 'shift_approved':
-                                return <><strong>{adminName}</strong> approved <strong>{targetName}'s</strong> shift</>;
-                              case 'shift_rejected':
-                                return <><strong>{adminName}</strong> rejected <strong>{targetName}'s</strong> shift</>;
-                              case 'shift_updated':
-                                return <><strong>{adminName}</strong> edited <strong>{targetName}'s</strong> shift</>;
-                              case 'shift_deleted':
-                                return <><strong>{adminName}</strong> deleted <strong>{targetName}'s</strong> shift</>;
-                              default:
-                                return <><strong>{adminName}</strong> {activity.action.replace(/_/g, ' ')} <strong>{targetName}</strong></>;
+                          for (const activity of activities) {
+                            // Skip approval entries - we use shift_status instead
+                            if (activity.action === 'shift_approved') continue;
+
+                            // For shift submissions, check shift's current status
+                            if ((activity.action === 'shift_submitted' || activity.action === 'shift_created') && activity.target_id) {
+                              const shiftIdKey = String(activity.target_id);
+                              if (seenShiftIds.has(shiftIdKey)) continue;
+                              seenShiftIds.add(shiftIdKey);
+
+                              // Use the actual shift status from the database
+                              const isApproved = activity.shift_status === 'approved' || activity.shift_status === 'paid';
+                              consolidated.push({
+                                ...activity,
+                                isApproved
+                              });
+                            } else {
+                              // Non-shift activities pass through unchanged
+                              consolidated.push(activity);
                             }
+                          }
+
+                          // Format timestamp without seconds
+                          const formatActivityTime = (raw) => {
+                            if (!raw) return '';
+                            const match = String(raw).match(/(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
+                            if (match) {
+                              const utc = Date.UTC(
+                                parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]),
+                                parseInt(match[4]), parseInt(match[5]), parseInt(match[6])
+                              );
+                              const d = new Date(utc);
+                              return d.toLocaleString('en-US', {
+                                month: 'numeric',
+                                day: 'numeric',
+                                year: '2-digit',
+                                hour: 'numeric',
+                                minute: '2-digit',
+                                hour12: true
+                              });
+                            }
+                            return new Date(raw).toLocaleString();
                           };
 
-                          return (
-                            <div key={i} className="activity-item">
-                              <span className="activity-description">{formatAction()}</span>
-                              <span className="activity-time">{(() => {
-                                const raw = activity.created_at;
-                                console.log('RAW TIMESTAMP:', raw);
-                                if (!raw) return '';
-                                // Parse UTC timestamp and convert to local time
-                                const match = String(raw).match(/(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
-                                if (match) {
-                                  const utc = Date.UTC(
-                                    parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]),
-                                    parseInt(match[4]), parseInt(match[5]), parseInt(match[6])
+                          return consolidated.slice(0, 10).map((activity, i) => {
+                            const targetName = activity.target_name || 'Unknown';
+                            const adminName = activity.admin_name || 'Admin';
+
+                            // Determine activity status class
+                            const getActivityClass = () => {
+                              if (activity.isApproved) return 'activity-approved';
+                              if (activity.action === 'shift_submitted' || activity.action === 'shift_created') {
+                                return 'activity-pending';
+                              }
+                              return '';
+                            };
+
+                            const formatAction = () => {
+                              // Format clock times if available
+                              const clockIn = activity.details?.clockIn ? formatTime(activity.details.clockIn) : null;
+                              const clockOut = activity.details?.clockOut ? formatTime(activity.details.clockOut) : null;
+                              const timeRange = clockIn && clockOut ? ` (${clockIn} - ${clockOut})` : '';
+
+                              switch (activity.action) {
+                                case 'user_created':
+                                  return <><strong>{adminName}</strong> added new employee <strong>{targetName}</strong></>;
+                                case 'user_updated':
+                                  return <><strong>{adminName}</strong> updated <strong>{targetName}</strong></>;
+                                case 'user_deactivated':
+                                  return <><strong>{adminName}</strong> deactivated <strong>{targetName}</strong></>;
+                                case 'user_activated':
+                                  return <><strong>{adminName}</strong> reactivated <strong>{targetName}</strong></>;
+                                case 'user_password_reset':
+                                  return <><strong>{adminName}</strong> reset password for <strong>{targetName}</strong></>;
+                                case 'shift_submitted':
+                                case 'shift_created':
+                                  const isSubmit = activity.action === 'shift_submitted' || activity.details?.selfService;
+                                  return (
+                                    <>
+                                      {isSubmit
+                                        ? <><strong>{targetName}</strong> submitted shift{timeRange}</>
+                                        : <><strong>{adminName}</strong> created shift for <strong>{targetName}</strong></>
+                                      }
+                                      {activity.isApproved && (
+                                        <span className="approval-timestamp">Approved</span>
+                                      )}
+                                    </>
                                   );
-                                  const result = new Date(utc).toLocaleString();
-                                  console.log('CONVERTED:', result);
-                                  return result;
-                                }
-                                return new Date(raw).toLocaleString();
-                              })()}</span>
-                            </div>
-                          );
-                        })}
+                                case 'shift_rejected':
+                                  return <><strong>{adminName}</strong> rejected <strong>{targetName}'s</strong> shift</>;
+                                case 'shift_updated':
+                                  return <><strong>{adminName}</strong> edited <strong>{targetName}'s</strong> shift</>;
+                                case 'shift_deleted':
+                                  return <><strong>{adminName}</strong> deleted <strong>{targetName}'s</strong> shift</>;
+                                default:
+                                  return <><strong>{adminName}</strong> {activity.action.replace(/_/g, ' ')} <strong>{targetName}</strong></>;
+                              }
+                            };
+
+                            return (
+                              <div key={i} className={`activity-item ${getActivityClass()}`}>
+                                <span className="activity-description">{formatAction()}</span>
+                                <span className="activity-time">{formatActivityTime(activity.created_at)}</span>
+                              </div>
+                            );
+                          });
+                        })()}
                         {(!dashboardData.recentActivity || dashboardData.recentActivity.length === 0) && (
                           <p className="empty-text">No recent admin activity</p>
                         )}
                       </div>
-                      <button
-                        className="btn-view-more"
-                        onClick={() => { setShowActivityModal(true); loadActivity(1); }}
-                      >
-                        View More
-                      </button>
                     </div>
                   </div>
                 </>
@@ -3115,14 +3253,18 @@ function TimeClock() {
                       </thead>
                       <tbody>
                         {adminUsers.map(u => (
-                          <tr key={u.id} className={u.status === 'inactive' ? 'inactive-row' : ''}>
+                          <tr
+                            key={u.id}
+                            className={`clickable-row ${u.status === 'inactive' ? 'inactive-row' : ''}`}
+                            onClick={() => loadUserPayWeeks(u.id)}
+                          >
                             <td>{u.id}</td>
                             <td>{u.name}</td>
                             <td>{u.email}</td>
                             <td><span className={`role-badge ${u.role}`}>{u.role}</span></td>
                             <td><span className={`status-badge ${u.status}`}>{u.status}</span></td>
                             <td>{new Date(u.created_at).toLocaleDateString()}</td>
-                            <td className="action-cell">
+                            <td className="action-cell" onClick={e => e.stopPropagation()}>
                               <button className="btn-edit-small" onClick={() => setEditingUser({...u})}>Edit</button>
                               {u.id !== user.id && (
                                 <button className="btn-delete-small" onClick={() => setDeleteConfirm({ type: 'user', id: u.id })}>Deactivate</button>
@@ -3271,77 +3413,76 @@ function TimeClock() {
               </div>
             </div>
             ) : (
-              /* Shifts List */
-              <div className="admin-content">
-                <div className="filters-bar" style={{ justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <input
-                      type="date"
-                      placeholder="Start Date"
-                      value={adminShiftsFilters.startDate}
-                      onChange={e => setAdminShiftsFilters({...adminShiftsFilters, startDate: e.target.value})}
-                    />
-                    <input
-                      type="date"
-                      placeholder="End Date"
-                      value={adminShiftsFilters.endDate}
-                      onChange={e => setAdminShiftsFilters({...adminShiftsFilters, endDate: e.target.value})}
-                    />
-                    <button className="btn-filter" onClick={() => loadAdminShifts(1)}>Apply Filters</button>
-                    <button className="btn-clear-filter" onClick={() => { setAdminShiftsFilters({ userId: '', startDate: '', endDate: '' }); loadAdminShifts(1); }}>Clear</button>
-                  </div>
+              /* Shifts List - Grouped by Week with Infinite Scroll */
+              <div className="admin-content shifts-by-week">
+                <div className="shifts-header-bar">
+                  <h2>All Shifts</h2>
                   <button className="btn-create" onClick={() => { if (adminUsers.length === 0) loadAdminUsers(); setCreatingShift(true); }}>+ Create Shift</button>
                 </div>
 
-                {adminLoading ? (
+                {shiftsWeeksLoading && shiftsWeeks.length === 0 ? (
                   <p className="loading-text">Loading shifts...</p>
+                ) : shiftsWeeks.length === 0 ? (
+                  <div className="empty-state">
+                    <p>No shifts found</p>
+                  </div>
                 ) : (
-                  <>
-                    <div className="admin-table-container">
-                      <table className="admin-table">
-                        <thead>
-                          <tr>
-                            <th>ID</th>
-                            <th>User</th>
-                            <th>Date</th>
-                            <th>Clock In</th>
-                            <th>Clock Out</th>
-                            <th>Hours</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {adminShifts.map(s => (
-                            <tr
-                              key={s.id}
-                              className="clickable-row"
-                              onClick={() => viewShiftDetails(s.id)}
-                            >
-                              <td>{s.id}</td>
-                              <td>{s.userName || s.user_name}</td>
-                              <td>{formatDate(s.date)}</td>
-                              <td>{formatTime(s.clock_in_time)}</td>
-                              <td>{formatTime(s.clock_out_time)}</td>
-                              <td>{s.total_hours}</td>
-                              <td><span className={`status-badge ${s.status}`}>{s.status}</span></td>
-                              <td className="action-cell" onClick={e => e.stopPropagation()}>
-                                <button className="btn-edit-small" onClick={() => setEditingShift({...s})}>Edit</button>
-                                <button className="btn-delete-small" onClick={() => setDeleteConfirm({ type: 'shift', id: s.id })}>Delete</button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    {adminShiftsPagination.totalPages > 1 && (
-                      <div className="pagination">
-                        <button disabled={adminShiftsPagination.page <= 1} onClick={() => loadAdminShifts(adminShiftsPagination.page - 1)}>Prev</button>
-                        <span>Page {adminShiftsPagination.page} of {adminShiftsPagination.totalPages}</span>
-                        <button disabled={adminShiftsPagination.page >= adminShiftsPagination.totalPages} onClick={() => loadAdminShifts(adminShiftsPagination.page + 1)}>Next</button>
+                  <div className="weeks-list">
+                    {shiftsWeeks.map((week, weekIdx) => (
+                      <div key={week.weekStart} className="week-section">
+                        <div className="week-header">
+                          <h3>{week.weekDisplay}</h3>
+                          <span className="week-shift-count">{week.shifts?.length || 0} shifts</span>
+                        </div>
+                        <div className="week-shifts-table">
+                          <table className="admin-table">
+                            <thead>
+                              <tr>
+                                <th>Employee</th>
+                                <th>Date</th>
+                                <th>Clock In</th>
+                                <th>Clock Out</th>
+                                <th>Hours</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {week.shifts?.map(s => (
+                                <tr
+                                  key={s.id}
+                                  className="clickable-row"
+                                  onClick={() => viewShiftDetails(s.id)}
+                                >
+                                  <td>{s.userName || s.user_name}</td>
+                                  <td>{formatDate(s.date)}</td>
+                                  <td>{formatTime(s.clock_in_time)}</td>
+                                  <td>{formatTime(s.clock_out_time)}</td>
+                                  <td>{s.total_hours}</td>
+                                  <td><span className={`status-badge ${s.status}`}>{s.status}</span></td>
+                                  <td className="action-cell" onClick={e => e.stopPropagation()}>
+                                    <button className="btn-edit-small" onClick={() => setEditingShift({...s})}>Edit</button>
+                                    <button className="btn-delete-small" onClick={() => setDeleteConfirm({ type: 'shift', id: s.id })}>Delete</button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ))}
+                    {shiftsWeeksHasMore && (
+                      <div className="load-more-container">
+                        <button
+                          className="btn-load-more"
+                          onClick={() => loadShiftsByWeek(false)}
+                          disabled={shiftsWeeksLoading}
+                        >
+                          {shiftsWeeksLoading ? 'Loading...' : 'Load More Weeks'}
+                        </button>
                       </div>
                     )}
-                  </>
+                  </div>
                 )}
               </div>
             )
@@ -3505,227 +3646,267 @@ function TimeClock() {
               ) : (
                 /* Main Weekly View */
                 <>
-                  <div className="weekly-header">
-                    <button className="btn-week-nav" onClick={() => {
-                      if (currentWeekStart) {
-                        const prevWeek = new Date(currentWeekStart);
-                        prevWeek.setDate(prevWeek.getDate() - 7);
-                        loadWeeklyView(prevWeek.toISOString().split('T')[0]);
-                      }
-                    }}>← Prev</button>
-                    <h3>{weeklyViewData?.weekDisplay || 'Loading...'}</h3>
-                    <button className="btn-week-nav" onClick={() => {
-                      if (currentWeekStart) {
-                        const nextWeek = new Date(currentWeekStart);
-                        nextWeek.setDate(nextWeek.getDate() + 7);
-                        loadWeeklyView(nextWeek.toISOString().split('T')[0]);
-                      }
-                    }}>Next →</button>
-                  </div>
+                  <div className="weekly-view-container">
+                    {/* Weeks Sidebar */}
+                    {showWeeksSidebar && (
+                      <div className="weeks-sidebar">
+                        <div className="weeks-sidebar-header">
+                          <h4>Select Week</h4>
+                          <button className="btn-close-sidebar" onClick={() => setShowWeeksSidebar(false)}>&times;</button>
+                        </div>
+                        <div className="weeks-list">
+                          {availableWeeks.map((week, idx) => (
+                            <button
+                              key={idx}
+                              className={`week-option ${week.weekStart === currentWeekStart ? 'active' : ''}`}
+                              onClick={() => {
+                                loadWeeklyView(week.weekStart);
+                                setShowWeeksSidebar(false);
+                              }}
+                            >
+                              <span className="week-dates">{week.display}</span>
+                              <span className="week-shift-count">{week.shiftCount} shifts</span>
+                            </button>
+                          ))}
+                          {availableWeeks.length === 0 && (
+                            <p className="no-weeks-msg">No weeks with shifts found</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
-                  {/* View Mode Toggle */}
-                  <div className="view-mode-toggle">
+                    <div className="weekly-main-content">
+                      <div className="weekly-header">
+                        <button className="btn-week-nav btn-weeks" onClick={async () => {
+                          // Load available weeks if not loaded
+                          if (availableWeeks.length === 0) {
+                            try {
+                              const data = await adminAPI.getAvailableWeeks();
+                              setAvailableWeeks(data.weeks || []);
+                            } catch (err) {
+                              console.error('Failed to load weeks:', err);
+                            }
+                          }
+                          setShowWeeksSidebar(!showWeeksSidebar);
+                        }}>📅 Weeks</button>
+                        <h3>{weeklyViewData?.weekDisplay || 'Loading...'}</h3>
+                      </div>
+
+                  {/* Mobile View Mode Toggle */}
+                  <div className="view-mode-toggle mobile-only">
                     <button
                       className={`toggle-btn ${weeklyViewMode === 'list' ? 'active' : ''}`}
                       onClick={() => setWeeklyViewMode('list')}
                     >
-                      List View
+                      List
                     </button>
                     <button
                       className={`toggle-btn ${weeklyViewMode === 'calendar' ? 'active' : ''}`}
                       onClick={() => setWeeklyViewMode('calendar')}
                     >
-                      Calendar View
+                      Calendar
                     </button>
                   </div>
 
                   {weeklyViewLoading ? (
                     <p className="loading-text">Loading weekly view...</p>
                   ) : weeklyViewData ? (
-                    <>
-                      {weeklyViewMode === 'list' ? (
-                        /* List View */
-                        <div className="weekly-employees-list">
-                          <div className="weekly-table-header">
-                            <span className="col-name">Employee</span>
-                            <span className="col-hours">Hours (Approved)</span>
-                            <span className="col-shifts">Shifts</span>
+                    <div className="weekly-combined-view">
+                      {/* Thin Employee List Sidebar */}
+                      <div className={`weekly-sidebar ${weeklyViewMode === 'calendar' ? 'mobile-hidden' : ''}`}>
+                        <div className="sidebar-header">Employee</div>
+                        {weeklyViewData.employees.filter(emp => emp.shifts.length > 0).map(emp => (
+                          <div
+                            key={emp.userId}
+                            className="sidebar-employee"
+                            onClick={() => loadUserPayWeeks(emp.userId)}
+                            style={{ borderLeftColor: `hsl(${(emp.userId * 137) % 360}, 70%, 50%)` }}
+                          >
+                            <span className="emp-name">{emp.userName}</span>
+                            <span className="emp-hours">{emp.totalHours}h</span>
                           </div>
-                          {weeklyViewData.employees.map(emp => (
-                            <div
-                              key={emp.userId}
-                              className="weekly-employee-row"
-                              onClick={() => loadUserPayWeeks(emp.userId)}
-                            >
-                              <span className="col-name">{emp.userName}</span>
-                              <span className="col-hours">{emp.totalHours} hrs</span>
-                              <span className="col-shifts">
-                                {emp.shifts.map((shift) => (
-                                  <span
-                                    key={shift.id}
-                                    className={`shift-dot ${shift.status}`}
-                                    title={`${new Date(shift.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })}: ${shift.totalHours}hrs (${shift.status})`}
-                                  />
-                                ))}
-                                {emp.shifts.length === 0 && <span className="no-shifts">No shifts</span>}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        /* Calendar View */
-                        <div className="weekly-calendar">
-                          {/* Helper function to parse time to hours */}
-                          {(() => {
-                            const parseTimeToHours = (time) => {
-                              if (!time) return null;
-                              // Handle ISO timestamp strings
-                              if (typeof time === 'string' && (time.includes('T') || (time.includes(' ') && time.includes('-')))) {
-                                const date = new Date(time);
-                                if (!isNaN(date.getTime())) {
-                                  return date.getHours() + date.getMinutes() / 60;
-                                }
-                              }
-                              // Handle "HH:MM" format
-                              if (typeof time === 'string' && time.includes(':')) {
-                                const parts = time.split(':');
-                                return parseInt(parts[0]) + parseInt(parts[1]) / 60;
-                              }
-                              return null;
-                            };
+                        ))}
+                        {weeklyViewData.employees.filter(emp => emp.shifts.length === 0).length > 0 && (
+                          <div className="sidebar-section-label">No Shifts</div>
+                        )}
+                        {weeklyViewData.employees.filter(emp => emp.shifts.length === 0).map(emp => (
+                          <div
+                            key={emp.userId}
+                            className="sidebar-employee no-shifts"
+                            onClick={() => loadUserPayWeeks(emp.userId)}
+                          >
+                            <span className="emp-name">{emp.userName}</span>
+                          </div>
+                        ))}
+                      </div>
 
-                            // Calendar hours range (6 AM to 10 PM in 2-hour intervals)
-                            const hourLabels = [6, 8, 10, 12, 14, 16, 18, 20, 22];
-                            const minHour = 6;
-                            const maxHour = 22;
-                            const hourRange = maxHour - minHour;
-
+                      {/* Calendar Grid - Row per Employee */}
+                      <div className={`weekly-calendar-grid ${weeklyViewMode === 'list' ? 'mobile-hidden' : ''}`}>
+                        {/* Day Headers */}
+                        <div className="calendar-header-row">
+                          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, idx) => {
+                            const weekStartDate = new Date(weeklyViewData.weekStart + 'T00:00:00');
+                            weekStartDate.setDate(weekStartDate.getDate() + idx);
                             return (
-                              <>
-                                {/* Time axis labels */}
-                                <div className="calendar-time-axis">
-                                  <div className="calendar-corner"></div>
-                                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, idx) => {
-                                    const weekStartDate = new Date(weeklyViewData.weekStart + 'T00:00:00');
-                                    weekStartDate.setDate(weekStartDate.getDate() + idx);
-                                    return (
-                                      <div key={day} className="calendar-day-header">
-                                        <span className="day-name">{day}</span>
-                                        <span className="day-date">{weekStartDate.getDate()}</span>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-
-                                {/* Hour rows with shift blocks */}
-                                <div className="calendar-grid">
-                                  {/* Hour labels - 2 hour intervals */}
-                                  <div className="calendar-hours">
-                                    {hourLabels.map(h => (
-                                      <div key={h} className="hour-label">
-                                        {h === 12 ? '12 PM' : h < 12 ? `${h} AM` : `${h - 12} PM`}
-                                      </div>
-                                    ))}
-                                  </div>
-
-                                  {/* Day columns */}
-                                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, dayIdx) => {
-                                    const weekStartDate = new Date(weeklyViewData.weekStart + 'T00:00:00');
-                                    weekStartDate.setDate(weekStartDate.getDate() + dayIdx);
-                                    const dayStr = weekStartDate.toISOString().split('T')[0];
-
-                                    // Get all shifts for this day across all employees
-                                    const dayShifts = [];
-                                    weeklyViewData.employees.forEach(emp => {
-                                      emp.shifts.forEach(shift => {
-                                        if (shift.date === dayStr && shift.clockInTime && shift.clockOutTime) {
-                                          dayShifts.push({
-                                            ...shift,
-                                            employeeName: emp.userName,
-                                            employeeId: emp.userId,
-                                            color: `hsl(${(emp.userId * 137) % 360}, 70%, 50%)`
-                                          });
-                                        }
-                                      });
-                                    });
-
-                                    return (
-                                      <div key={dayIdx} className="calendar-day-column">
-                                        {/* Hour grid lines - 2 hour intervals */}
-                                        {hourLabels.map(h => (
-                                          <div key={h} className="hour-cell"></div>
-                                        ))}
-
-                                        {/* Shift blocks */}
-                                        {dayShifts.map((shift, shiftIdx) => {
-                                          // Parse times to get position
-                                          const startHour = parseTimeToHours(shift.clockInTime);
-                                          const endHour = parseTimeToHours(shift.clockOutTime);
-
-                                          if (startHour === null || endHour === null) return null;
-
-                                          // Clamp to visible range
-                                          const visibleStart = Math.max(startHour, minHour);
-                                          const visibleEnd = Math.min(endHour, maxHour);
-                                          const duration = visibleEnd - visibleStart;
-
-                                          if (duration <= 0) return null;
-
-                                          // Calculate horizontal offset for overlapping shifts
-                                          const overlapping = dayShifts.filter((s, i) => {
-                                            if (i >= shiftIdx) return false;
-                                            const sStart = parseTimeToHours(s.clockInTime);
-                                            const sEnd = parseTimeToHours(s.clockOutTime);
-                                            if (sStart === null || sEnd === null) return false;
-                                            return !(endHour <= sStart || startHour >= sEnd);
-                                          }).length;
-
-                                          return (
-                                            <div
-                                              key={`${shift.id}-${shiftIdx}`}
-                                              className={`calendar-shift-block ${shift.status}`}
-                                              style={{
-                                                top: `${((visibleStart - minHour) / hourRange) * 100}%`,
-                                                height: `${(duration / hourRange) * 100}%`,
-                                                left: `${overlapping * 30}%`,
-                                                width: `${Math.max(70 - overlapping * 20, 30)}%`,
-                                                backgroundColor: shift.color,
-                                                opacity: shift.status === 'approved' || shift.status === 'paid' ? 0.9 : 0.6
-                                              }}
-                                              title={`${shift.employeeName}: ${formatTime(shift.clockInTime)} - ${formatTime(shift.clockOutTime)} (${shift.totalHours}hrs)`}
-                                              onClick={() => loadUserPayWeeks(shift.employeeId)}
-                                            >
-                                              <span className="shift-block-name">{shift.employeeName}</span>
-                                              <span className="shift-block-time">{formatTime(shift.clockInTime)}</span>
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-
-                                {/* Legend */}
-                                <div className="calendar-legend">
-                                  {weeklyViewData.employees.filter(emp => emp.shifts.length > 0).map(emp => (
-                                    <div key={emp.userId} className="legend-item" onClick={() => loadUserPayWeeks(emp.userId)}>
-                                      <span
-                                        className="legend-color"
-                                        style={{ backgroundColor: `hsl(${(emp.userId * 137) % 360}, 70%, 50%)` }}
-                                      ></span>
-                                      <span className="legend-name">{emp.userName}</span>
-                                      <span className="legend-hours">{emp.totalHours}h</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </>
+                              <div key={day} className="calendar-day-col-header">
+                                <span className="day-name">{day}</span>
+                                <span className="day-date">{weekStartDate.getDate()}</span>
+                              </div>
                             );
-                          })()}
+                          })}
                         </div>
-                      )}
-                    </>
+
+                        {/* Employee Rows */}
+                        {weeklyViewData.employees.filter(emp => emp.shifts.length > 0).map(emp => {
+                          const empColor = `hsl(${(emp.userId * 137) % 360}, 70%, 50%)`;
+                          return (
+                            <div key={emp.userId} className="calendar-employee-row">
+                              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, dayIdx) => {
+                                const weekStartDate = new Date(weeklyViewData.weekStart + 'T00:00:00');
+                                weekStartDate.setDate(weekStartDate.getDate() + dayIdx);
+                                const dayStr = weekStartDate.toISOString().split('T')[0];
+
+                                const dayShift = emp.shifts.find(s => s.date === dayStr);
+
+                                return (
+                                  <div key={dayIdx} className="calendar-day-cell">
+                                    {dayShift && (
+                                      <div
+                                        className={`shift-bar ${dayShift.status}`}
+                                        style={{ backgroundColor: empColor }}
+                                        onClick={() => loadUserPayWeeks(emp.userId)}
+                                        title={`${emp.userName}: ${formatTime(dayShift.clockInTime)} - ${formatTime(dayShift.clockOutTime)} (${dayShift.totalHours}hrs)`}
+                                      >
+                                        <span className="shift-time">{formatTime(dayShift.clockInTime)}</span>
+                                        <span className="shift-dash">-</span>
+                                        <span className="shift-time">{formatTime(dayShift.clockOutTime)}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   ) : (
                     <p className="empty-text">No data available</p>
+                  )}
+                    </div>{/* End weekly-main-content */}
+                  </div>{/* End weekly-view-container */}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Activity Full Page View */}
+          {adminSubTab === 'activity' && (
+            <div className="admin-content">
+              <div className="activity-page-header">
+                <button className="btn-back" onClick={() => setAdminSubTab('dashboard')}>← Back to Dashboard</button>
+                <h2>Activity Log</h2>
+              </div>
+              {activityLoading ? (
+                <p className="loading-text">Loading activity...</p>
+              ) : (
+                <>
+                  <div className="activity-list full-page">
+                    {activityData.activity?.map((activity, i) => {
+                      const targetName = activity.target_name || 'Unknown';
+                      const adminName = activity.admin_name || 'Admin';
+                      const clockIn = activity.details?.clockIn ? formatTime(activity.details.clockIn) : null;
+                      const clockOut = activity.details?.clockOut ? formatTime(activity.details.clockOut) : null;
+                      const timeRange = clockIn && clockOut ? ` (${clockIn} - ${clockOut})` : '';
+
+                      // Determine activity status class
+                      const getActivityClass = () => {
+                        if (activity.action === 'shift_submitted' || activity.action === 'shift_created') {
+                          return 'activity-pending';
+                        }
+                        if (activity.action === 'shift_approved') {
+                          return 'activity-approved';
+                        }
+                        return '';
+                      };
+
+                      // Format timestamp without seconds
+                      const formatActivityTime = (raw) => {
+                        if (!raw) return '';
+                        const match = String(raw).match(/(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
+                        if (match) {
+                          const utc = Date.UTC(
+                            parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]),
+                            parseInt(match[4]), parseInt(match[5]), parseInt(match[6])
+                          );
+                          const d = new Date(utc);
+                          return d.toLocaleString('en-US', {
+                            month: 'numeric',
+                            day: 'numeric',
+                            year: '2-digit',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                            hour12: true
+                          });
+                        }
+                        return new Date(raw).toLocaleString();
+                      };
+
+                      const formatAction = () => {
+                        switch (activity.action) {
+                          case 'user_created':
+                            return <><strong>{adminName}</strong> added new employee <strong>{targetName}</strong></>;
+                          case 'user_updated':
+                            return <><strong>{adminName}</strong> updated <strong>{targetName}</strong></>;
+                          case 'user_deactivated':
+                            return <><strong>{adminName}</strong> deactivated <strong>{targetName}</strong></>;
+                          case 'user_activated':
+                            return <><strong>{adminName}</strong> reactivated <strong>{targetName}</strong></>;
+                          case 'user_password_reset':
+                            return <><strong>{adminName}</strong> reset password for <strong>{targetName}</strong></>;
+                          case 'shift_submitted':
+                          case 'shift_created':
+                            return activity.details?.selfService
+                              ? <><strong>{targetName}</strong> submitted shift{timeRange}</>
+                              : <><strong>{adminName}</strong> created shift for <strong>{targetName}</strong></>;
+                          case 'shift_approved':
+                            return (
+                              <>
+                                <strong>{adminName}</strong> approved <strong>{targetName}'s</strong> shift
+                                <span className="approval-timestamp">Approved {formatActivityTime(activity.created_at)}</span>
+                              </>
+                            );
+                          case 'shift_rejected':
+                            return <><strong>{adminName}</strong> rejected <strong>{targetName}'s</strong> shift</>;
+                          case 'shift_updated':
+                            return <><strong>{adminName}</strong> edited <strong>{targetName}'s</strong> shift</>;
+                          case 'shift_deleted':
+                            return <><strong>{adminName}</strong> deleted <strong>{targetName}'s</strong> shift</>;
+                          default:
+                            return <><strong>{adminName}</strong> {activity.action.replace(/_/g, ' ')} <strong>{targetName}</strong></>;
+                        }
+                      };
+
+                      return (
+                        <div key={i} className={`activity-item ${getActivityClass()}`}>
+                          <span className="activity-description">{formatAction()}</span>
+                          <span className="activity-time">{formatActivityTime(activity.created_at)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {activityData.pagination?.totalPages > 1 && (
+                    <div className="pagination">
+                      <button
+                        disabled={activityData.pagination.page <= 1}
+                        onClick={() => loadActivity(activityData.pagination.page - 1)}
+                      >Prev</button>
+                      <span>Page {activityData.pagination.page} of {activityData.pagination.totalPages}</span>
+                      <button
+                        disabled={activityData.pagination.page >= activityData.pagination.totalPages}
+                        onClick={() => loadActivity(activityData.pagination.page + 1)}
+                      >Next</button>
+                    </div>
                   )}
                 </>
               )}
@@ -3845,6 +4026,9 @@ function TimeClock() {
               </div>
             </div>
           )}
+
+            </div>{/* End admin-main */}
+          </div>{/* End admin-layout */}
         </main>
       )}
     </div>

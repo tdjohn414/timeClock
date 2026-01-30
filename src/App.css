@@ -1,10 +1,11 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 .app {
-  max-width: 1200px;
+  max-width: 80vw;
   margin: 0 auto;
-  padding: 20px;
+  padding: 20px 24px;
   font-family: 'Inter', sans-serif;
+  box-sizing: border-box;
 }
 
 /* Header */
@@ -14,8 +15,26 @@
 
 .header-top {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: center;
+}
+
+.header-logo {
+  display: flex;
+  flex-direction: column;
+}
+
+.logo-company {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #1e293b;
+  letter-spacing: 0.5px;
+}
+
+.logo-app {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #3b82f6;
 }
 
 .header h1 {
@@ -1429,6 +1448,15 @@
   background: #fdf2f2;
 }
 
+.dropdown-item.toggle-view-item {
+  color: #3b82f6;
+  border-top: 1px solid #eee;
+}
+
+.dropdown-item.toggle-view-item:hover {
+  background: #eff6ff;
+}
+
 /* Password Modal */
 .password-modal {
   max-width: 400px;
@@ -1629,41 +1657,121 @@
 /* ==================== ADMIN PANEL STYLES ==================== */
 
 .admin-panel {
-  max-width: 1400px;
-  margin: 0 auto;
+  width: 100%;
 }
 
-/* Admin Sub-Navigation */
-.admin-sub-nav {
+/* Admin Sidebar Layout */
+.admin-layout {
   display: flex;
-  gap: 0;
-  margin-bottom: 20px;
-  background: white;
-  border-radius: 10px;
-  padding: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  gap: 24px;
+  min-height: calc(100vh - 120px);
 }
 
-.admin-sub-tab {
+.admin-sidebar {
+  width: 200px;
+  flex-shrink: 0;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  padding: 16px 12px;
+  align-self: stretch;
+}
+
+.admin-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
   background: transparent;
   border: none;
-  padding: 10px 20px;
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: #7f8c8d;
+  border-radius: 8px;
   cursor: pointer;
-  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #64748b;
   transition: all 0.2s;
+  text-align: left;
+  width: 100%;
 }
 
-.admin-sub-tab:hover {
-  color: #9b59b6;
-  background: rgba(155, 89, 182, 0.08);
+.admin-nav-item:hover {
+  background: #f1f5f9;
+  color: #334155;
 }
 
-.admin-sub-tab.active {
-  background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
+.admin-nav-item.active {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   color: white;
+}
+
+.admin-nav-item .nav-icon {
+  font-size: 1.1rem;
+}
+
+.admin-nav-item .nav-label {
+  flex: 1;
+}
+
+.admin-nav-item .nav-badge {
+  background: #ef4444;
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 10px;
+  min-width: 18px;
+  text-align: center;
+}
+
+.admin-nav-item.active .nav-badge {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.admin-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Mobile responsive sidebar */
+@media (max-width: 768px) {
+  .admin-layout {
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .admin-sidebar {
+    width: 100%;
+    position: static;
+  }
+
+  .admin-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .admin-nav-item {
+    flex: 1;
+    min-width: 120px;
+    justify-content: center;
+    padding: 10px 12px;
+  }
+
+  .admin-nav-item .nav-label {
+    display: none;
+  }
+
+  .admin-nav-item .nav-icon {
+    font-size: 1.3rem;
+  }
 }
 
 /* Admin Content Area */
@@ -1672,6 +1780,7 @@
   border-radius: 12px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   padding: 24px;
+  flex: 1;
 }
 
 /* Stats Grid */
@@ -1730,6 +1839,10 @@
   color: #2c3e50;
   padding-bottom: 10px;
   border-bottom: 1px solid #eee;
+}
+
+.dashboard-section h3.week-range {
+  text-align: center;
 }
 
 /* Top Employees */
@@ -1800,6 +1913,66 @@
   white-space: nowrap;
 }
 
+/* Activity Status Colors */
+.activity-item.activity-pending {
+  border-left-color: #fbbf24;
+  background: #fffbeb;
+}
+
+.activity-item.activity-approved {
+  border-left-color: #22c55e;
+  background: #f0fdf4;
+}
+
+.approval-timestamp {
+  display: block;
+  font-size: 0.8rem;
+  color: #16a34a;
+  font-weight: 500;
+  margin-top: 4px;
+}
+
+/* Section Header Row with View More */
+.section-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.section-header-row h3 {
+  margin: 0;
+}
+
+.view-more-link {
+  color: #3b82f6;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.view-more-link:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+/* Activity Full Page */
+.activity-page-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.activity-page-header h2 {
+  margin: 0;
+  color: #1e293b;
+}
+
+.activity-list.full-page {
+  gap: 10px;
+}
+
 /* Admin Header Bar */
 .admin-header-bar {
   display: flex;
@@ -1861,6 +2034,114 @@
 .admin-table tbody tr.inactive-row {
   opacity: 0.6;
   background: #f5f5f5;
+}
+
+/* Week-Grouped Shifts View */
+.shifts-by-week {
+  padding: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.shifts-header-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  margin-bottom: 16px;
+}
+
+.shifts-header-bar h2 {
+  margin: 0;
+  font-size: 1.4rem;
+  color: #2c3e50;
+}
+
+.weeks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.week-section {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+.week-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.week-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #334155;
+  font-weight: 600;
+}
+
+.week-shift-count {
+  font-size: 0.85rem;
+  color: #64748b;
+  background: white;
+  padding: 4px 12px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.week-shifts-table {
+  overflow-x: auto;
+}
+
+.week-shifts-table .admin-table {
+  margin: 0;
+}
+
+.week-shifts-table .admin-table th {
+  background: #fafbfc;
+  padding: 10px 16px;
+  font-size: 0.85rem;
+}
+
+.week-shifts-table .admin-table td {
+  padding: 12px 16px;
+}
+
+.load-more-container {
+  display: flex;
+  justify-content: center;
+  padding: 20px;
+}
+
+.btn-load-more {
+  padding: 12px 32px;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-load-more:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+.btn-load-more:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* Role & Status Badges */
@@ -2768,6 +3049,19 @@
   border-left: 3px solid #9b59b6;
 }
 
+/* Clickable Name in Table */
+.clickable-name {
+  color: #3b82f6;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.clickable-name:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
 /* ==================== SHIFTS TWO-COLUMN LAYOUT ==================== */
 
 .shifts-layout {
@@ -3106,7 +3400,18 @@
 }
 
 .activity-item {
-  border-left-color: #94a3b8 !important;
+  border-left-color: #94a3b8;
+}
+
+/* Activity status-specific colors need higher specificity */
+.activity-item.activity-pending {
+  border-left-color: #fbbf24 !important;
+  background: #fffbeb !important;
+}
+
+.activity-item.activity-approved {
+  border-left-color: #22c55e !important;
+  background: #f0fdf4 !important;
 }
 
 /* Pending Badge in Tab */
@@ -3307,6 +3612,131 @@
   background: #1e293b;
 }
 
+.btn-week-nav.btn-weeks {
+  background: #3b82f6;
+}
+
+.btn-week-nav.btn-weeks:hover {
+  background: #2563eb;
+}
+
+/* Weekly View Container with Weeks Sidebar */
+.weekly-view-container {
+  display: flex;
+  gap: 16px;
+  position: relative;
+}
+
+.weeks-sidebar {
+  width: 280px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  padding: 16px;
+  height: fit-content;
+  position: sticky;
+  top: 20px;
+  flex-shrink: 0;
+  animation: slideIn 0.2s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.weeks-sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.weeks-sidebar-header h4 {
+  margin: 0;
+  font-size: 1rem;
+  color: #1e293b;
+}
+
+.btn-close-sidebar {
+  background: transparent;
+  border: none;
+  font-size: 1.5rem;
+  color: #94a3b8;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+}
+
+.btn-close-sidebar:hover {
+  color: #64748b;
+}
+
+.weeks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.week-option {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+  width: 100%;
+}
+
+.week-option:hover {
+  background: #e2e8f0;
+}
+
+.week-option.active {
+  background: #3b82f6;
+  color: white;
+}
+
+.week-option .week-dates {
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.week-option .week-shift-count {
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.week-option.active .week-shift-count {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.no-weeks-msg {
+  color: #94a3b8;
+  font-style: italic;
+  text-align: center;
+  padding: 20px;
+}
+
+.weekly-main-content {
+  flex: 1;
+  min-width: 0;
+}
+
 .weekly-employees-list {
   background: white;
   border: 1px solid #e2e8f0;
@@ -3392,11 +3822,15 @@
   font-size: 0.85rem;
 }
 
-/* View Mode Toggle */
+/* View Mode Toggle - Mobile Only */
 .view-mode-toggle {
-  display: flex;
+  display: none;
   gap: 8px;
   margin-bottom: 16px;
+}
+
+.view-mode-toggle.mobile-only {
+  display: none;
 }
 
 .toggle-btn {
@@ -3420,165 +3854,249 @@
   border-color: #334155;
 }
 
-/* Weekly Calendar View */
-.weekly-calendar {
+/* Weekly Combined View - Side by Side Layout */
+.weekly-combined-view {
+  display: flex;
+  gap: 0;
   background: white;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   overflow: hidden;
 }
 
-.calendar-time-axis {
-  display: grid;
-  grid-template-columns: 50px repeat(7, 1fr);
-  border-bottom: 1px solid #e2e8f0;
+/* Thin Employee Sidebar */
+.weekly-sidebar {
+  width: 160px;
+  min-width: 160px;
+  border-right: 1px solid #e2e8f0;
   background: #f8fafc;
 }
 
-.calendar-corner {
-  padding: 8px 4px;
-  border-right: 1px solid #e2e8f0;
-}
-
-.calendar-day-header {
-  padding: 8px 4px;
-  text-align: center;
-  border-right: 1px solid #e2e8f0;
-}
-
-.calendar-day-header:last-child {
-  border-right: none;
-}
-
-.calendar-day-header .day-name {
-  display: block;
+.sidebar-header {
+  padding: 12px;
   font-weight: 600;
-  color: #1e293b;
-  font-size: 0.85rem;
-}
-
-.calendar-day-header .day-date {
-  display: block;
+  font-size: 0.8rem;
   color: #64748b;
-  font-size: 0.75rem;
-}
-
-.calendar-grid {
-  display: grid;
-  grid-template-columns: 50px repeat(7, 1fr);
-  height: 360px;
-}
-
-.calendar-hours {
-  border-right: 1px solid #e2e8f0;
-}
-
-.hour-label {
-  height: 40px;
-  padding: 2px 4px;
-  font-size: 0.65rem;
-  color: #94a3b8;
-  text-align: right;
-  border-bottom: 1px solid #f1f5f9;
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-}
-
-.calendar-day-column {
-  position: relative;
-  border-right: 1px solid #e2e8f0;
-}
-
-.calendar-day-column:last-child {
-  border-right: none;
-}
-
-.hour-cell {
-  height: 40px;
-  border-bottom: 1px solid #f1f5f9;
-}
-
-.hour-cell:nth-child(even) {
-  background: #fafbfc;
-}
-
-.calendar-shift-block {
-  position: absolute;
-  left: 2px;
-  right: 2px;
-  border-radius: 4px;
-  padding: 4px 6px;
-  overflow: hidden;
-  cursor: pointer;
-  transition: opacity 0.2s, transform 0.2s;
-  z-index: 1;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
-}
-
-.calendar-shift-block:hover {
-  opacity: 1 !important;
-  transform: scale(1.02);
-  z-index: 10;
-}
-
-.shift-block-name {
-  display: block;
-  font-size: 0.7rem;
-  font-weight: 600;
-  color: white;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
-}
-
-.shift-block-time {
-  display: block;
-  font-size: 0.65rem;
-  color: rgba(255,255,255,0.9);
-  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
-}
-
-/* Calendar Legend */
-.calendar-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 12px 16px;
-  border-top: 1px solid #e2e8f0;
-  background: #f8fafc;
-}
-
-.legend-item {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #e2e8f0;
+  height: 52px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 4px;
-  transition: background 0.2s;
 }
 
-.legend-item:hover {
+.sidebar-employee {
+  padding: 10px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  cursor: pointer;
+  transition: background 0.2s;
+  border-left: 4px solid transparent;
+  height: 64px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.sidebar-employee:hover {
   background: #e2e8f0;
 }
 
-.legend-color {
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
-}
-
-.legend-name {
+.sidebar-employee .emp-name {
   font-size: 0.85rem;
+  font-weight: 500;
   color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.legend-hours {
+.sidebar-employee .emp-hours {
   font-size: 0.75rem;
+  color: #22c55e;
+  font-weight: 600;
+}
+
+.sidebar-employee.no-shifts {
+  border-left-color: transparent;
+}
+
+.sidebar-employee.no-shifts .emp-name {
+  color: #94a3b8;
+}
+
+.sidebar-section-label {
+  padding: 8px 12px;
+  font-size: 0.7rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  background: #f1f5f9;
+}
+
+/* Calendar Grid - Row per Employee */
+.weekly-calendar-grid {
+  flex: 1;
+  overflow-x: auto;
+}
+
+.calendar-header-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+  min-width: 700px;
+}
+
+.calendar-day-col-header {
+  padding: 8px 4px;
+  text-align: center;
+  border-right: 1px solid #e2e8f0;
+  height: 52px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.calendar-day-col-header:last-child {
+  border-right: none;
+}
+
+.calendar-day-col-header .day-name {
+  font-weight: 600;
+  color: #1e293b;
+  font-size: 0.85rem;
+}
+
+.calendar-day-col-header .day-date {
   color: #64748b;
-  font-weight: 500;
+  font-size: 0.75rem;
+}
+
+.calendar-employee-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  border-bottom: 1px solid #e2e8f0;
+  min-width: 700px;
+}
+
+.calendar-employee-row:last-child {
+  border-bottom: none;
+}
+
+.calendar-day-cell {
+  padding: 4px;
+  border-right: 1px solid #e2e8f0;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.calendar-day-cell:last-child {
+  border-right: none;
+}
+
+.shift-bar {
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+
+.shift-bar:hover {
+  transform: scale(1.02);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+.shift-bar .shift-time {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+.shift-bar .shift-dash {
+  font-size: 0.65rem;
+  color: rgba(255,255,255,0.8);
+}
+
+/* Shift bar status colors - override inline styles */
+.shift-bar.pending_approval {
+  background-color: #fef3c7 !important;
+  border: 1px solid #f59e0b;
+}
+
+.shift-bar.pending_approval .shift-time,
+.shift-bar.pending_approval .shift-dash {
+  color: #92400e !important;
+  text-shadow: none !important;
+}
+
+.shift-bar.rejected {
+  background-color: #fecaca !important;
+  border: 1px solid #ef4444;
+}
+
+.shift-bar.rejected .shift-time,
+.shift-bar.rejected .shift-dash {
+  color: #991b1b !important;
+  text-shadow: none !important;
+}
+
+.shift-bar.in_progress {
+  background-color: #dbeafe !important;
+  border: 1px solid #3b82f6;
+}
+
+.shift-bar.in_progress .shift-time,
+.shift-bar.in_progress .shift-dash {
+  color: #1e40af !important;
+  text-shadow: none !important;
+}
+
+/* Mobile Hidden */
+.mobile-hidden {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .mobile-hidden {
+    display: block;
+  }
+
+  .weekly-sidebar.mobile-hidden,
+  .weekly-calendar-grid.mobile-hidden {
+    display: block;
+  }
+}
+
+@media (max-width: 767px) {
+  .view-mode-toggle.mobile-only {
+    display: flex;
+  }
+
+  .weekly-combined-view {
+    flex-direction: column;
+  }
+
+  .weekly-sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  .weekly-sidebar.mobile-hidden {
+    display: none;
+  }
+
+  .weekly-calendar-grid.mobile-hidden {
+    display: none;
+  }
 }
 
 /* User Pay Weeks View */

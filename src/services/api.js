@@ -428,6 +428,15 @@ export const adminAPI = {
     return request(`/admin/users/${userId}/pay-weeks${queryString ? `?${queryString}` : ''}`);
   },
 
+  // Get available weeks with shifts
+  getAvailableWeeks: () => request('/admin/available-weeks'),
+
+  // Get shifts grouped by week for infinite scroll
+  getShiftsByWeek: (params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    return request(`/admin/shifts/by-week${queryString ? `?${queryString}` : ''}`);
+  },
+
   // Paginated Activity
   getActivity: (params = {}) => {
     const queryString = new URLSearchParams(params).toString();
