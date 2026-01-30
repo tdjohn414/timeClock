@@ -3444,7 +3444,12 @@ function TimeClock() {
                               {isExpanded && (
                                 <div className="pay-week-shifts">
                                   {week.shifts.map(shift => (
-                                    <div key={shift.id} className="pay-week-shift-row">
+                                    <div
+                                      key={shift.id}
+                                      className="pay-week-shift-row clickable"
+                                      onClick={() => viewShiftDetails(shift.id)}
+                                      style={{ cursor: 'pointer' }}
+                                    >
                                       <span className="shift-date">{new Date(shift.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
                                       <span className="shift-times">{formatTime(shift.clockInTime)} - {formatTime(shift.clockOutTime)}</span>
                                       <span className="shift-hours">{shift.totalHours} hrs</span>
@@ -4175,7 +4180,7 @@ function TimeClock() {
                                       <div
                                         className={`shift-bar ${dayShift.status}`}
                                         style={{ backgroundColor: empColor }}
-                                        onClick={() => loadUserPayWeeks(emp.userId)}
+                                        onClick={() => viewShiftDetails(dayShift.id)}
                                         title={`${emp.userName}: ${formatTime(dayShift.clockInTime)} - ${formatTime(dayShift.clockOutTime)} (${dayShift.totalHours}hrs)`}
                                       >
                                         <span className="shift-time">{formatTime(dayShift.clockInTime)}</span>
