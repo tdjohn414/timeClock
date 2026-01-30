@@ -4310,10 +4310,7 @@
 
 .mini-block .block-tasks {
   color: #64748b;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 300px;
+  flex: 1;
 }
 
 /* Pending Approval Layout */
