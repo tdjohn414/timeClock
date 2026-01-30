@@ -68,6 +68,11 @@ function TimeClock() {
   const [shiftsWeeksHasMore, setShiftsWeeksHasMore] = useState(true);
   const [shiftsEmployeeFilter, setShiftsEmployeeFilter] = useState('');
   const [shiftsStatusFilter, setShiftsStatusFilter] = useState('');
+  const [shiftsSelectMode, setShiftsSelectMode] = useState(false);
+  const [selectedShiftIds, setSelectedShiftIds] = useState(new Set());
+  const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = useState(false);
+  const [batchActionDropdown, setBatchActionDropdown] = useState(false);
+  const [statusDropdownShiftId, setStatusDropdownShiftId] = useState(null);
   const [editingShift, setEditingShift] = useState(null);
   const [viewingShift, setViewingShift] = useState(null);
   const [viewingShiftLoading, setViewingShiftLoading] = useState(false);
@@ -269,6 +274,18 @@ function TimeClock() {
     return () => observer.disconnect();
   }, [shiftsWeeksHasMore, shiftsWeeks.length]);
 
+  // Reload shifts when employee filter changes
+  useEffect(() => {
+    if (adminSubTab === 'shifts') {
+      setShiftsWeeks([]);
+      setShiftsWeeksOffset(0);
+      setShiftsWeeksHasMore(true);
+      shiftsHasMoreRef.current = true;
+      shiftsLoadingRef.current = false;
+      loadShiftsByWeek(true);
+    }
+  }, [shiftsEmployeeFilter]);
+
   const loadDashboard = async () => {
     setAdminLoading(true);
     try {
@@ -452,6 +469,94 @@ function TimeClock() {
       console.error('Failed to batch approve:', err);
       setAdminToast({ type: 'error', message: err.message || 'Failed to batch approve' });
     }
+  };
+
+  // Quick status change from dropdown
+  const handleQuickStatusChange = async (shiftId, newStatus, currentStatus) => {
+    setStatusDropdownShiftId(null);
+    try {
+      if (newStatus === 'paid') {
+        await adminAPI.markShiftPaid(shiftId);
+        setAdminToast({ type: 'success', message: 'Shift marked as paid' });
+      } else if (newStatus === 'approved' && currentStatus === 'paid') {
+        // Revert paid to approved - use updateShift
+        await adminAPI.updateShift(shiftId, { status: 'approved' });
+        setAdminToast({ type: 'success', message: 'Shift reverted to approved' });
+      } else if (newStatus === 'approved') {
+        await adminAPI.approveShift(shiftId);
+        setAdminToast({ type: 'success', message: 'Shift approved' });
+      }
+      loadShiftsByWeek(true);
+    } catch (err) {
+      console.error('Failed to change status:', err);
+      setAdminToast({ type: 'error', message: err.message || 'Failed to change status' });
+    }
+  };
+
+  // Quick delete from status dropdown
+  const handleQuickDelete = (shiftId) => {
+    setStatusDropdownShiftId(null);
+    setDeleteConfirm({ type: 'shift', id: shiftId });
+  };
+
+  // Batch mark paid for All Shifts view
+  const handleBatchMarkPaid = async () => {
+    if (selectedShiftIds.size === 0) return;
+    try {
+      const result = await adminAPI.batchMarkPaid(Array.from(selectedShiftIds));
+      setAdminToast({ type: 'success', message: `Marked ${result.updated?.length || selectedShiftIds.size} shifts as paid` });
+      setSelectedShiftIds(new Set());
+      setShiftsSelectMode(false);
+      setBatchActionDropdown(false);
+      loadShiftsByWeek(true);
+    } catch (err) {
+      console.error('Failed to batch mark paid:', err);
+      setAdminToast({ type: 'error', message: err.message || 'Failed to mark shifts as paid' });
+    }
+  };
+
+  // Batch delete shifts
+  const handleBatchDeleteShifts = async () => {
+    if (selectedShiftIds.size === 0) return;
+    try {
+      for (const shiftId of selectedShiftIds) {
+        await adminAPI.deleteShift(shiftId);
+      }
+      setAdminToast({ type: 'success', message: `Deleted ${selectedShiftIds.size} shifts` });
+      setSelectedShiftIds(new Set());
+      setShiftsSelectMode(false);
+      setShowBatchDeleteConfirm(false);
+      setBatchActionDropdown(false);
+      loadShiftsByWeek(true);
+    } catch (err) {
+      console.error('Failed to batch delete:', err);
+      setAdminToast({ type: 'error', message: err.message || 'Failed to delete shifts' });
+    }
+  };
+
+  // Toggle shift selection
+  const toggleShiftSelection = (shiftId) => {
+    setSelectedShiftIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(shiftId)) {
+        newSet.delete(shiftId);
+      } else {
+        newSet.add(shiftId);
+      }
+      return newSet;
+    });
+  };
+
+  // Select all visible shifts
+  const selectAllVisibleShifts = () => {
+    const allIds = new Set();
+    shiftsWeeks.forEach(week => {
+      const filteredShifts = shiftsStatusFilter
+        ? (week.shifts || []).filter(s => s.status === shiftsStatusFilter)
+        : (week.shifts || []);
+      filteredShifts.forEach(s => allIds.add(s.id));
+    });
+    setSelectedShiftIds(allIds);
   };
 
   // Load notifications for employees
@@ -2080,10 +2185,25 @@ function TimeClock() {
 
       <header className="header">
         <div className="header-top">
-          <div className="header-logo">
+          <button
+            type="button"
+            className="header-logo"
+            onClick={() => {
+              if (user?.role === 'admin') {
+                setActiveTab('admin');
+                setAdminSubTab('dashboard');
+                setViewingUserPayWeeks(null);
+                setUserPayWeeksData(null);
+                setViewingShift(null);
+                setStatusDropdownShiftId(null);
+                setShiftsSelectMode(false);
+                setSelectedShiftIds(new Set());
+              }
+            }}
+          >
             <span className="logo-company">FULL SCOPE ESTIMATING</span>
             <span className="logo-app">Time Clock</span>
-          </div>
+          </button>
           <div className="header-right">
             {/* Test Controls - Commented out for production
             <div className="test-controls">
@@ -2759,6 +2879,32 @@ function TimeClock() {
                     }}
                   >
                     Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Batch Delete Confirmation Modal */}
+          {showBatchDeleteConfirm && (
+            <div className="modal-overlay" onClick={() => setShowBatchDeleteConfirm(false)}>
+              <div className="preview-modal delete-modal" onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h2>Delete {selectedShiftIds.size} Shifts</h2>
+                  <button className="modal-close" onClick={() => setShowBatchDeleteConfirm(false)}>&times;</button>
+                </div>
+                <div className="modal-body">
+                  <p className="delete-warning">
+                    You are about to delete <strong>{selectedShiftIds.size}</strong> shifts. This action cannot be undone.
+                  </p>
+                </div>
+                <div className="modal-footer">
+                  <button className="btn-cancel-modal" onClick={() => setShowBatchDeleteConfirm(false)}>Cancel</button>
+                  <button
+                    className="btn-delete-confirm"
+                    onClick={handleBatchDeleteShifts}
+                  >
+                    Delete All
                   </button>
                 </div>
               </div>
@@ -3575,16 +3721,16 @@ function TimeClock() {
                     <div className="filter-pills">
                       <button
                         className={`filter-pill ${shiftsEmployeeFilter === '' ? 'active' : ''}`}
-                        onClick={() => { setShiftsEmployeeFilter(''); setShiftsWeeks([]); setShiftsWeeksOffset(0); setShiftsWeeksHasMore(true); shiftsHasMoreRef.current = true; }}
+                        onClick={() => setShiftsEmployeeFilter('')}
                       >
                         All
                       </button>
-                      {/* Get unique employees from loaded shifts */}
-                      {[...new Map(shiftsWeeks.flatMap(w => w.shifts || []).map(s => [s.user_id, { id: s.user_id, name: s.userName || s.user_name }])).values()].map(emp => (
+                      {/* Use adminUsers for employee filter list */}
+                      {adminUsers.filter(u => u.role === 'user').map(emp => (
                         <button
                           key={emp.id}
                           className={`filter-pill ${shiftsEmployeeFilter === String(emp.id) ? 'active' : ''}`}
-                          onClick={() => { setShiftsEmployeeFilter(String(emp.id)); setShiftsWeeks([]); setShiftsWeeksOffset(0); setShiftsWeeksHasMore(true); shiftsHasMoreRef.current = true; }}
+                          onClick={() => setShiftsEmployeeFilter(String(emp.id))}
                         >
                           {emp.name}
                         </button>
@@ -3631,38 +3777,139 @@ function TimeClock() {
                       <div key={week.weekStart} className="week-section">
                         <div className="week-header centered">
                           <h3>{week.weekDisplay}</h3>
-                          <span className="week-shift-count">{filteredShifts.length} shifts</span>
+                          <button
+                            className="btn-select-mode"
+                            onClick={() => {
+                              if (shiftsSelectMode) {
+                                setShiftsSelectMode(false);
+                                setSelectedShiftIds(new Set());
+                                setBatchActionDropdown(false);
+                              } else {
+                                setShiftsSelectMode(true);
+                              }
+                            }}
+                          >
+                            {shiftsSelectMode ? 'Cancel' : 'Select'}
+                          </button>
                         </div>
+                        {/* Batch action bar when in select mode */}
+                        {shiftsSelectMode && selectedShiftIds.size > 0 && (
+                          <div className="batch-action-bar">
+                            <span className="selected-count">{selectedShiftIds.size} selected</span>
+                            <button className="btn-batch-paid" onClick={handleBatchMarkPaid}>
+                              Mark as Paid
+                            </button>
+                            <div className="batch-dropdown-container">
+                              <button
+                                className="btn-batch-more"
+                                onClick={() => setBatchActionDropdown(!batchActionDropdown)}
+                              >
+                                More ▾
+                              </button>
+                              {batchActionDropdown && (
+                                <div className="batch-dropdown">
+                                  <button
+                                    className="batch-dropdown-item danger"
+                                    onClick={() => setShowBatchDeleteConfirm(true)}
+                                  >
+                                    Delete Selected
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
                         <div className="week-shifts-table">
                           <table className="admin-table">
                             <thead>
                               <tr>
+                                {shiftsSelectMode && <th className="checkbox-col"></th>}
                                 <th>Employee</th>
                                 <th>Date</th>
                                 <th>Clock In</th>
                                 <th>Clock Out</th>
                                 <th>Hours</th>
                                 <th>Status</th>
-                                <th>Actions</th>
+                                {!shiftsSelectMode && <th>Actions</th>}
                               </tr>
                             </thead>
                             <tbody>
                               {filteredShifts.map(s => (
                                 <tr
                                   key={s.id}
-                                  className="clickable-row"
-                                  onClick={() => viewShiftDetails(s.id)}
+                                  className={`clickable-row ${selectedShiftIds.has(s.id) ? 'selected-row' : ''}`}
+                                  onClick={() => shiftsSelectMode ? toggleShiftSelection(s.id) : viewShiftDetails(s.id)}
                                 >
+                                  {shiftsSelectMode && (
+                                    <td className="checkbox-col" onClick={e => e.stopPropagation()}>
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedShiftIds.has(s.id)}
+                                        onChange={() => toggleShiftSelection(s.id)}
+                                      />
+                                    </td>
+                                  )}
                                   <td>{s.userName || s.user_name}</td>
                                   <td>{formatDate(s.date)}</td>
                                   <td>{formatTime(s.clock_in_time)}</td>
                                   <td>{formatTime(s.clock_out_time)}</td>
                                   <td>{s.total_hours}</td>
-                                  <td><span className={`status-badge ${s.status}`}>{s.status}</span></td>
-                                  <td className="action-cell" onClick={e => e.stopPropagation()}>
-                                    <button className="btn-edit-small" onClick={() => setEditingShift({...s})}>Edit</button>
-                                    <button className="btn-delete-small" onClick={() => setDeleteConfirm({ type: 'shift', id: s.id })}>Delete</button>
+                                  <td className="status-cell" onClick={e => e.stopPropagation()}>
+                                    {['approved', 'pending_approval', 'paid'].includes(s.status) ? (
+                                      <div className="status-dropdown-container">
+                                        <button
+                                          className={`status-badge clickable ${s.status}`}
+                                          onClick={() => setStatusDropdownShiftId(statusDropdownShiftId === s.id ? null : s.id)}
+                                        >
+                                          {s.status.replace('_', ' ')} <span className="status-arrow">▾</span>
+                                        </button>
+                                        {statusDropdownShiftId === s.id && (
+                                          <div className="status-dropdown">
+                                            {s.status === 'approved' && (
+                                              <button
+                                                className="status-dropdown-item paid"
+                                                onClick={() => handleQuickStatusChange(s.id, 'paid', 'approved')}
+                                              >
+                                                Mark as Paid
+                                              </button>
+                                            )}
+                                            {s.status === 'paid' && (
+                                              <button
+                                                className="status-dropdown-item approved"
+                                                onClick={() => handleQuickStatusChange(s.id, 'approved', 'paid')}
+                                              >
+                                                Revert to Approved
+                                              </button>
+                                            )}
+                                            {s.status === 'pending_approval' && (
+                                              <>
+                                                <button
+                                                  className="status-dropdown-item approved"
+                                                  onClick={() => handleQuickStatusChange(s.id, 'approved', 'pending_approval')}
+                                                >
+                                                  Approve
+                                                </button>
+                                                <button
+                                                  className="status-dropdown-item danger"
+                                                  onClick={() => handleQuickDelete(s.id)}
+                                                >
+                                                  Delete
+                                                </button>
+                                              </>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className={`status-badge ${s.status}`}>{s.status.replace('_', ' ')}</span>
+                                    )}
                                   </td>
+                                  {!shiftsSelectMode && (
+                                    <td className="action-cell" onClick={e => e.stopPropagation()}>
+                                      <button className="btn-edit-small" onClick={() => setEditingShift({...s})}>Edit</button>
+                                      <button className="btn-delete-small" onClick={() => setDeleteConfirm({ type: 'shift', id: s.id })}>Delete</button>
+                                    </td>
+                                  )}
                                 </tr>
                               ))}
                             </tbody>
