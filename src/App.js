@@ -79,6 +79,7 @@ function TimeClock() {
   const [batchActionDropdown, setBatchActionDropdown] = useState(false);
   const [statusDropdownShiftId, setStatusDropdownShiftId] = useState(null);
   const [editingShift, setEditingShift] = useState(null);
+  const [employeeEditingShift, setEmployeeEditingShift] = useState(null);
   const [viewingShift, setViewingShift] = useState(null);
   const [viewingShiftLoading, setViewingShiftLoading] = useState(false);
   const [expandedTaskBlocks, setExpandedTaskBlocks] = useState(new Set());
@@ -830,6 +831,27 @@ function TimeClock() {
       loadAdminShifts(adminShiftsPagination.page);
     } catch (err) {
       setAdminToast({ type: 'error', message: err.message || 'Failed to update shift' });
+    }
+  };
+
+  // Employee updating their own shift (pending_approval or rejected)
+  const handleEmployeeUpdateShift = async () => {
+    if (!employeeEditingShift) return;
+    try {
+      await shiftsAPI.update(employeeEditingShift.id, {
+        date: employeeEditingShift.date,
+        clockInTime: employeeEditingShift.clockInTime,
+        clockOutTime: employeeEditingShift.clockOutTime,
+        totalHours: employeeEditingShift.totalHours,
+        timeBlocks: employeeEditingShift.timeBlocks || []
+      });
+      setEmployeeEditingShift(null);
+      // Reload shifts
+      const updatedShifts = await shiftsAPI.getAll();
+      setShifts(updatedShifts);
+      alert('Shift updated and resubmitted for approval');
+    } catch (err) {
+      alert(err.message || 'Failed to update shift');
     }
   };
 
@@ -2801,6 +2823,28 @@ function TimeClock() {
                         </div>
                         <div className="history-header-right">
                           <span className="history-hours">{isInProgress ? '--' : shift.totalHours} hrs</span>
+                          {/* Edit button for pending_approval or rejected shifts */}
+                          {(shift.status === 'pending_approval' || shift.status === 'rejected') && (
+                            <button
+                              type="button"
+                              className="btn-edit-shift"
+                              title="Edit and resubmit"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEmployeeEditingShift({
+                                  id: shiftId,
+                                  date: shift.date,
+                                  clockInTime: shift.clockInTime,
+                                  clockOutTime: shift.clockOutTime,
+                                  totalHours: shift.totalHours,
+                                  timeBlocks: shift.timeBlocks || [],
+                                  status: shift.status
+                                });
+                              }}
+                            >
+                              ✏️
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="btn-delete-shift"
@@ -3721,7 +3765,11 @@ function TimeClock() {
                             const getShiftDateDisplay = () => {
                               const shiftDate = activity.details?.date || activity.details?.shiftDate;
                               if (shiftDate) {
-                                const d = new Date(shiftDate + 'T12:00:00');
+                                // Handle both "YYYY-MM-DD" and ISO "YYYY-MM-DDTHH:MM:SS" formats
+                                const dateStr = String(shiftDate);
+                                const dateOnly = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+                                const d = new Date(dateOnly + 'T12:00:00');
+                                if (isNaN(d.getTime())) return null;
                                 return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                               }
                               return null;
@@ -4490,7 +4538,11 @@ function TimeClock() {
                       const getShiftDateDisplay = () => {
                         const shiftDate = activity.details?.date || activity.details?.shiftDate;
                         if (shiftDate) {
-                          const d = new Date(shiftDate + 'T12:00:00');
+                          // Handle both "YYYY-MM-DD" and ISO "YYYY-MM-DDTHH:MM:SS" formats
+                          const dateStr = String(shiftDate);
+                          const dateOnly = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+                          const d = new Date(dateOnly + 'T12:00:00');
+                          if (isNaN(d.getTime())) return null;
                           return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                         }
                         return null;
@@ -4660,6 +4712,64 @@ function TimeClock() {
             </div>{/* End admin-main */}
           </div>{/* End admin-layout */}
         </main>
+      )}
+
+      {/* Employee Edit Shift Modal */}
+      {employeeEditingShift && (
+        <div className="modal-overlay" onClick={() => setEmployeeEditingShift(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Edit Shift</h2>
+              <button className="modal-close" onClick={() => setEmployeeEditingShift(null)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              {employeeEditingShift.status === 'rejected' && (
+                <p className="info-text" style={{ color: '#dc2626', marginBottom: '16px' }}>
+                  This shift was rejected. Make your corrections and save to resubmit for approval.
+                </p>
+              )}
+              <div className="form-field">
+                <label>Date</label>
+                <input
+                  type="date"
+                  value={employeeEditingShift.date?.split('T')[0] || employeeEditingShift.date || ''}
+                  onChange={e => setEmployeeEditingShift({...employeeEditingShift, date: e.target.value})}
+                />
+              </div>
+              <div className="form-field">
+                <label>Clock In</label>
+                <input
+                  type="time"
+                  value={employeeEditingShift.clockInTime?.substring(0,5) || ''}
+                  onChange={e => setEmployeeEditingShift({...employeeEditingShift, clockInTime: e.target.value})}
+                />
+              </div>
+              <div className="form-field">
+                <label>Clock Out</label>
+                <input
+                  type="time"
+                  value={employeeEditingShift.clockOutTime?.substring(0,5) || ''}
+                  onChange={e => setEmployeeEditingShift({...employeeEditingShift, clockOutTime: e.target.value})}
+                />
+              </div>
+              <div className="form-field">
+                <label>Total Hours</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={employeeEditingShift.totalHours || ''}
+                  onChange={e => setEmployeeEditingShift({...employeeEditingShift, totalHours: e.target.value})}
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-cancel-modal" onClick={() => setEmployeeEditingShift(null)}>Cancel</button>
+              <button className="btn-confirm-modal" onClick={handleEmployeeUpdateShift}>
+                Save & Resubmit
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

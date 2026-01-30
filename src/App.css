@@ -899,6 +899,27 @@
   color: white;
 }
 
+.btn-edit-shift {
+  background: transparent;
+  border: 1px solid #3b82f6;
+  color: #3b82f6;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+}
+
+.btn-edit-shift:hover {
+  background: #3b82f6;
+  filter: brightness(1.2);
+}
+
 .expand-icon {
   color: #7f8c8d;
   font-size: 0.7rem;
