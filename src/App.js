@@ -12,6 +12,59 @@ const SOCKET_URL = process.env.REACT_APP_API_URL?.replace('/api', '') || 'http:/
 // Hardcoded admin email
 const ADMIN_EMAIL = 'tyler@fullscopeestimating.com';
 
+// Preset task names (used for quick task entry)
+const PRESET_TASK_NAMES = [
+  'Copying scope',
+  'Confirming COC received',
+  'Confirming supplement received',
+  'Confirming depreciation released',
+  'Confirming supplement reviewed',
+  'Writing supplement',
+  'Inbound call'
+];
+
+// Check if a task is a preset task (non-editable)
+const isPresetTask = (task) => {
+  if (!task || !task.includes(' - ')) return false;
+  return PRESET_TASK_NAMES.some(preset => task.startsWith(preset + ' - '));
+};
+
+// Get the Sunday-to-Saturday week bounds for a given date (matches backend)
+const getWeekBounds = (date = new Date()) => {
+  const d = typeof date === 'string' ? new Date(date + 'T12:00:00') : new Date(date);
+  const day = d.getDay(); // 0 = Sunday
+
+  const weekStart = new Date(d);
+  weekStart.setDate(d.getDate() - day);
+  weekStart.setHours(12, 0, 0, 0);
+
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 6);
+  weekEnd.setHours(12, 0, 0, 0);
+
+  const formatDate = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+
+  // Format display like backend
+  const startMonth = weekStart.toLocaleDateString('en-US', { month: 'short' });
+  const endMonth = weekEnd.toLocaleDateString('en-US', { month: 'short' });
+  const startDay = weekStart.getDate();
+  const endDay = weekEnd.getDate();
+  const year = weekStart.getFullYear();
+
+  let display;
+  if (startMonth === endMonth) {
+    display = `${startMonth} ${startDay} - ${endDay}, ${year}`;
+  } else {
+    display = `${startMonth} ${startDay} - ${endMonth} ${endDay}`;
+  }
+
+  return {
+    weekStart: formatDate(weekStart),
+    weekEnd: formatDate(weekEnd),
+    display
+  };
+};
+
 // Generate consistent avatar gradient from name
 const getAvatarGradient = (name) => {
   const gradients = [
@@ -44,14 +97,16 @@ function TimeClock() {
   const [completedBlocks, setCompletedBlocks] = useState([]);
   const [currentBlock, setCurrentBlock] = useState(null);
   const [currentTasks, setCurrentTasks] = useState(['']); // Array of task inputs for current block
+  const [pendingPreset, setPendingPreset] = useState(null); // Preset task waiting for detail input
+  const [presetDetail, setPresetDetail] = useState(''); // Detail input for preset task (e.g., "Jones")
   const [editingBlock, setEditingBlock] = useState(null); // For "going back in time"
+  const [editingBlockOriginal, setEditingBlockOriginal] = useState(null); // Original block before editing (for cancel)
   const [editingTasks, setEditingTasks] = useState(['']); // Array of task inputs for editing block
   const [editingOriginalIndex, setEditingOriginalIndex] = useState(null); // Track original position
   const [swipingBlockId, setSwipingBlockId] = useState(null);
+  const [showCancelShiftConfirm, setShowCancelShiftConfirm] = useState(false); // Confirm cancel shift dialog
   const [testBlocks, setTestBlocks] = useState(5);
   const [testBreaks, setTestBreaks] = useState(2);
-  const [nowOffsetHours, setNowOffsetHours] = useState(0);
-  const [nowOffsetMins, setNowOffsetMins] = useState(0);
   const [activeTab, setActiveTab] = useState('today'); // 'today', 'history', or 'admin'
   const [adminShifts, setAdminShifts] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
@@ -121,6 +176,7 @@ function TimeClock() {
   const [gapData, setGapData] = useState(null); // { startTime, endTime, pendingBlocks, gapIndex }
   const [gapTasks, setGapTasks] = useState(['']);
   const [blocksBeforeEdit, setBlocksBeforeEdit] = useState(null); // For restoring on gap cancel
+  const [gapAnimatingIndex, setGapAnimatingIndex] = useState(null); // Index where gap animation is happening
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const dropdownRef = useRef(null);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -168,6 +224,8 @@ function TimeClock() {
   const [weeklyViewMode, setWeeklyViewMode] = useState('calendar'); // 'list' or 'calendar'
   const [showWeeksSidebar, setShowWeeksSidebar] = useState(false);
   const [availableWeeks, setAvailableWeeks] = useState([]);
+  const [weekSlideDirection, setWeekSlideDirection] = useState(null); // 'left' or 'right' for animation
+  const [weeklyViewCache, setWeeklyViewCache] = useState({}); // Cache weekly data by weekStart
 
   // User Pay Weeks State
   const [viewingUserPayWeeks, setViewingUserPayWeeks] = useState(null);
@@ -431,8 +489,18 @@ function TimeClock() {
     }
   };
 
-  // Load weekly view data
-  const loadWeeklyView = async (weekStart = null) => {
+  // Load weekly view data (with caching)
+  const loadWeeklyView = async (weekStart = null, forceRefresh = false) => {
+    // Check cache first (unless force refresh)
+    const cacheKey = weekStart || 'current';
+    if (!forceRefresh && weeklyViewCache[cacheKey]) {
+      // Use cached data - instant transition!
+      const cachedData = weeklyViewCache[cacheKey];
+      setWeeklyViewData(cachedData);
+      setCurrentWeekStart(cachedData.weekStart);
+      return;
+    }
+
     setWeeklyViewLoading(true);
     try {
       // Load weekly view data and available weeks in parallel
@@ -442,6 +510,8 @@ function TimeClock() {
       ]);
       setWeeklyViewData(data);
       setCurrentWeekStart(data.weekStart);
+      // Cache the data
+      setWeeklyViewCache(prev => ({ ...prev, [data.weekStart]: data }));
       if (weeksData.weeks) {
         setAvailableWeeks(weeksData.weeks);
       }
@@ -784,7 +854,8 @@ function TimeClock() {
           totalMinutes += mins;
         }
       }
-      const totalHours = (totalMinutes / 60).toFixed(2);
+      // Round to nearest 0.25 (15 minutes)
+      const totalHours = formatHours(totalMinutes / 60);
 
       await adminAPI.createShift({
         userId: parseInt(newShiftData.userId),
@@ -974,30 +1045,6 @@ function TimeClock() {
     return getActualTime();
   };
 
-  // Get end time = start time + offset (for "Now" on end time field)
-  const getEndTimeWithOffset = (startTime) => {
-    if (!startTime) return getActualTime();
-
-    const [h, m] = startTime.split(':').map(Number);
-    const baseTime = new Date(2000, 0, 1, h, m);
-
-    // Add offset to get end time
-    baseTime.setHours(baseTime.getHours() + nowOffsetHours);
-    baseTime.setMinutes(baseTime.getMinutes() + nowOffsetMins);
-
-    const hours = String(baseTime.getHours()).padStart(2, '0');
-    const minutes = String(baseTime.getMinutes()).padStart(2, '0');
-    return `${hours}:${minutes}`;
-  };
-
-  // Increment end time - if no end time, use start time as base
-  const incrementEndTime = (block, updateFn, minutes) => {
-    const baseTime = block.endTime || block.startTime;
-    if (!baseTime) return;
-    const newTime = addMinutesToTime(baseTime, minutes);
-    updateFn('endTime', newTime);
-  };
-
   const addMinutesToTime = (time, minutesToAdd) => {
     const [hours, minutes] = time.split(':').map(Number);
     const date = new Date(2000, 0, 1, hours, minutes);
@@ -1028,27 +1075,57 @@ function TimeClock() {
 
     const diffMs = endDate - startDate;
     const diffHours = diffMs / (1000 * 60 * 60);
-    return diffHours > 0 ? diffHours.toFixed(2) : '0.00';
+    // Round to nearest 0.25 (15 minutes)
+    const roundedHours = Math.round(diffHours * 4) / 4;
+    return roundedHours > 0 ? roundedHours.toFixed(2) : '0.00';
   };
 
-  const handleClockIn = async () => {
-    try {
-      const clockInTime = getStartTime();
-      // Create pending shift on server - convert to UTC for storage
-      const shift = await shiftsAPI.clockIn(currentDate, localTimeToUTC(clockInTime, currentDate));
-      setPendingShiftId(shift.id);
+  // Format hours to always show 15-minute increments (0.00, 0.25, 0.50, 0.75)
+  const formatHours = (hours) => {
+    if (!hours && hours !== 0) return '0.00';
+    const num = parseFloat(hours);
+    // Round to nearest 0.25
+    const rounded = Math.round(num * 4) / 4;
+    return rounded.toFixed(2);
+  };
 
-      const newBlock = {
-        id: Date.now(),
-        startTime: clockInTime,
-        endTime: '',
-        tasks: ''
-      };
-      setCurrentBlock(newBlock);
+  const handleClockIn = () => {
+    // Don't create shift on server yet - wait until first block is saved
+    // Just create local block for user to fill in
+    const newBlock = {
+      id: Date.now(),
+      startTime: '', // User will select their start time
+      endTime: '',
+      tasks: ''
+    };
+    setCurrentBlock(newBlock);
+    setCurrentTasks(['']);
+  };
+
+  // Cancel shift and delete all time blocks
+  const handleCancelShift = async () => {
+    try {
+      if (pendingShiftId) {
+        await shiftsAPI.discard(pendingShiftId);
+      }
+      // Clear all local state
+      setCurrentBlock(null);
+      setCompletedBlocks([]);
       setCurrentTasks(['']);
+      setPendingShiftId(null);
+      setEditingBlock(null);
+      setEditingBlockOriginal(null);
+      setEditingTasks(['']);
+      setPendingPreset(null);
+      setPresetDetail('');
+      setAutoSaveStatus('idle');
+      setShowCancelShiftConfirm(false);
+      setToast({ type: 'info', message: 'Shift cancelled' });
+      setTimeout(() => setToast(null), 3000);
     } catch (err) {
-      console.error('Failed to clock in:', err);
-      alert('Failed to start shift: ' + err.message);
+      console.error('Failed to cancel shift:', err);
+      alert('Failed to cancel shift: ' + err.message);
+      setShowCancelShiftConfirm(false);
     }
   };
 
@@ -1058,7 +1135,28 @@ function TimeClock() {
   };
 
   const handleAdvanceBlock = async () => {
-    if (!currentBlock || !currentBlock.endTime) return;
+    if (!currentBlock || !currentBlock.startTime || !currentBlock.endTime) {
+      if (!currentBlock?.startTime) {
+        setToast({ type: 'error', message: 'Please select a start time' });
+        setTimeout(() => setToast(null), 3000);
+      }
+      return;
+    }
+
+    // Validate: start and end time cannot be the same
+    if (currentBlock.startTime === currentBlock.endTime) {
+      setToast({ type: 'error', message: 'Start and end time cannot be the same' });
+      setTimeout(() => setToast(null), 3000);
+      return;
+    }
+
+    // Validate: block cannot be longer than 2 hours
+    const blockHours = calculateBlockHours(currentBlock.startTime, currentBlock.endTime);
+    if (blockHours > 2) {
+      setToast({ type: 'error', message: 'Time block cannot be longer than 2 hours' });
+      setTimeout(() => setToast(null), 3000);
+      return;
+    }
 
     // Join tasks before completing
     const completedBlock = {
@@ -1069,30 +1167,10 @@ function TimeClock() {
     // Trigger swipe animation
     setSwipingBlockId(currentBlock.id);
 
-    setTimeout(async () => {
-      // Save block to server if we have a pending shift
-      if (pendingShiftId) {
-        try {
-          setAutoSaveStatus('saving');
-          const savedBlock = await shiftsAPI.addBlock(pendingShiftId, {
-            startTime: localTimeToUTC(completedBlock.startTime, currentDate),
-            endTime: localTimeToUTC(completedBlock.endTime, currentDate),
-            tasks: completedBlock.tasks,
-            isBreak: completedBlock.isBreak || false
-          });
-          // Update local block with server ID
-          completedBlock.serverId = savedBlock.id;
-          setAutoSaveStatus('saved');
-          setTimeout(() => setAutoSaveStatus('idle'), 2000);
-        } catch (err) {
-          console.error('Failed to save block:', err);
-          setAutoSaveStatus('error');
-          setTimeout(() => setAutoSaveStatus('idle'), 3000);
-        }
-      }
-
-      // Move current block to completed
-      setCompletedBlocks([...completedBlocks, completedBlock]);
+    // Optimistic update - move to completed as swipe-out finishes
+    setTimeout(() => {
+      // Move current block to completed immediately (optimistic)
+      setCompletedBlocks(prev => [...prev, completedBlock]);
 
       // Create new current block with previous end time as start
       const newBlock = {
@@ -1105,22 +1183,61 @@ function TimeClock() {
       setCurrentTasks(['']);
       setSwipingBlockId(null);
       setEditingBlock(null);
-    }, 400);
+      setEditingBlockOriginal(null);
+    }, 150); // Start slightly before swipe-out finishes for overlap
+
+    // Save to server in background (non-blocking)
+    (async () => {
+      try {
+        setAutoSaveStatus('saving');
+
+        // Create shift on server if this is the first block
+        let shiftId = pendingShiftId;
+        if (!shiftId) {
+          const shift = await shiftsAPI.clockIn(currentDate, localTimeToUTC(completedBlock.startTime, currentDate));
+          shiftId = shift.id;
+          setPendingShiftId(shiftId);
+        }
+
+        // Save block to server
+        const savedBlock = await shiftsAPI.addBlock(shiftId, {
+          startTime: localTimeToUTC(completedBlock.startTime, currentDate),
+          endTime: localTimeToUTC(completedBlock.endTime, currentDate),
+          tasks: completedBlock.tasks,
+          isBreak: completedBlock.isBreak || false
+        });
+
+        // Update local block with server ID
+        setCompletedBlocks(prev => prev.map(b =>
+          b.id === completedBlock.id ? { ...b, serverId: savedBlock.id } : b
+        ));
+        setAutoSaveStatus('saved');
+        setTimeout(() => setAutoSaveStatus('idle'), 2000);
+      } catch (err) {
+        console.error('Failed to save block:', err);
+        // Revert optimistic update on failure
+        setCompletedBlocks(prev => prev.filter(b => b.id !== completedBlock.id));
+        // Restore the current block
+        setCurrentBlock(completedBlock);
+        setCurrentTasks(completedBlock.tasks ? completedBlock.tasks.split(' • ') : ['']);
+        setToast({ type: 'error', message: 'Failed to save block. Please try again.' });
+        setTimeout(() => setToast(null), 4000);
+        setAutoSaveStatus('error');
+        setTimeout(() => setAutoSaveStatus('idle'), 3000);
+      }
+    })();
   };
 
-  const handleBreak = async () => {
+  const handleBreak = () => {
     if (!currentBlock) return;
 
     // Break starts where current block ends (or use current block's end time if set)
-    // Do NOT use getActualTime() here - breaks should continue from last block
     let breakStartTime;
     if (currentBlock.endTime) {
       breakStartTime = currentBlock.endTime;
     } else if (completedBlocks.length > 0) {
-      // Use end time of last completed block
       breakStartTime = completedBlocks[completedBlocks.length - 1].endTime;
     } else {
-      // Fallback: use current block's start time
       breakStartTime = currentBlock.startTime;
     }
 
@@ -1128,28 +1245,13 @@ function TimeClock() {
 
     // Complete current block first if it has content
     const joinedTasks = joinTasks(currentTasks);
-    let updatedBlocks = [...completedBlocks];
+    let workBlock = null;
+
     if (currentBlock.startTime && joinedTasks) {
-      const workBlock = { ...currentBlock, tasks: joinedTasks, endTime: breakStartTime };
-      // Save work block to server if we have a pending shift
-      if (pendingShiftId) {
-        try {
-          const savedBlock = await shiftsAPI.addBlock(pendingShiftId, {
-            startTime: localTimeToUTC(workBlock.startTime, currentDate),
-            endTime: localTimeToUTC(workBlock.endTime, currentDate),
-            tasks: workBlock.tasks,
-            isBreak: false
-          });
-          workBlock.serverId = savedBlock.id;
-        } catch (err) {
-          console.error('Failed to save work block:', err);
-        }
-      }
-      updatedBlocks = [...completedBlocks, workBlock];
-      setCompletedBlocks(updatedBlocks);
+      workBlock = { ...currentBlock, tasks: joinedTasks, endTime: breakStartTime };
     }
 
-    // Create break block and immediately complete it
+    // Create break block
     const breakBlock = {
       id: Date.now(),
       startTime: breakStartTime,
@@ -1158,30 +1260,17 @@ function TimeClock() {
       isBreak: true
     };
 
+    // Trigger swipe animation
     setSwipingBlockId(breakBlock.id);
 
-    setTimeout(async () => {
-      // Save break block to server
-      if (pendingShiftId) {
-        try {
-          setAutoSaveStatus('saving');
-          const savedBreak = await shiftsAPI.addBlock(pendingShiftId, {
-            startTime: localTimeToUTC(breakBlock.startTime, currentDate),
-            endTime: localTimeToUTC(breakBlock.endTime, currentDate),
-            tasks: breakBlock.tasks,
-            isBreak: true
-          });
-          breakBlock.serverId = savedBreak.id;
-          setAutoSaveStatus('saved');
-          setTimeout(() => setAutoSaveStatus('idle'), 2000);
-        } catch (err) {
-          console.error('Failed to save break:', err);
-          setAutoSaveStatus('error');
-          setTimeout(() => setAutoSaveStatus('idle'), 3000);
-        }
+    // Optimistic update - move to completed as swipe-out finishes
+    setTimeout(() => {
+      // Add work block if exists, then break block
+      if (workBlock) {
+        setCompletedBlocks(prev => [...prev, workBlock, breakBlock]);
+      } else {
+        setCompletedBlocks(prev => [...prev, breakBlock]);
       }
-
-      setCompletedBlocks(prev => [...prev, breakBlock]);
 
       // Create new current block starting after break
       const newBlock = {
@@ -1193,14 +1282,96 @@ function TimeClock() {
       setCurrentBlock(newBlock);
       setCurrentTasks(['']);
       setSwipingBlockId(null);
-    }, 400);
+    }, 150);
+
+    // Save to server in background (non-blocking)
+    (async () => {
+      try {
+        setAutoSaveStatus('saving');
+        let shiftId = pendingShiftId;
+
+        // Create shift on server if this is the first block
+        if (!shiftId) {
+          const startTimeForShift = workBlock ? workBlock.startTime : breakBlock.startTime;
+          const shift = await shiftsAPI.clockIn(currentDate, localTimeToUTC(startTimeForShift, currentDate));
+          shiftId = shift.id;
+          setPendingShiftId(shiftId);
+        }
+
+        // Save work block first if exists
+        if (workBlock) {
+          const savedWorkBlock = await shiftsAPI.addBlock(shiftId, {
+            startTime: localTimeToUTC(workBlock.startTime, currentDate),
+            endTime: localTimeToUTC(workBlock.endTime, currentDate),
+            tasks: workBlock.tasks,
+            isBreak: false
+          });
+          setCompletedBlocks(prev => prev.map(b =>
+            b.id === workBlock.id ? { ...b, serverId: savedWorkBlock.id } : b
+          ));
+        }
+
+        // Save break block
+        const savedBreak = await shiftsAPI.addBlock(shiftId, {
+          startTime: localTimeToUTC(breakBlock.startTime, currentDate),
+          endTime: localTimeToUTC(breakBlock.endTime, currentDate),
+          tasks: breakBlock.tasks,
+          isBreak: true
+        });
+        setCompletedBlocks(prev => prev.map(b =>
+          b.id === breakBlock.id ? { ...b, serverId: savedBreak.id } : b
+        ));
+
+        setAutoSaveStatus('saved');
+        setTimeout(() => setAutoSaveStatus('idle'), 2000);
+      } catch (err) {
+        console.error('Failed to save break:', err);
+        // Revert optimistic update on failure
+        setCompletedBlocks(prev => prev.filter(b => b.id !== breakBlock.id && (workBlock ? b.id !== workBlock.id : true)));
+        // Restore current block state
+        if (workBlock) {
+          setCurrentBlock({ ...workBlock, endTime: '' });
+          setCurrentTasks(workBlock.tasks ? workBlock.tasks.split(' • ') : ['']);
+        }
+        setAutoSaveStatus('error');
+        setTimeout(() => setAutoSaveStatus('idle'), 3000);
+      }
+    })();
+  };
+
+  // Helper to check if end time is valid for a given start time
+  const isEndTimeValidForStart = (startTime, endTime) => {
+    if (!startTime || !endTime) return true; // No validation needed if either is empty
+    const [sh, sm] = startTime.split(':').map(Number);
+    const [eh, em] = endTime.split(':').map(Number);
+    let startMins = sh * 60 + sm;
+    let endMins = eh * 60 + em;
+    if (endMins <= startMins) endMins += 24 * 60; // Handle overnight
+    const diff = endMins - startMins;
+    return diff >= 15 && diff <= 120; // Valid if 15 mins to 2 hours
   };
 
   const updateCurrentBlock = (field, value) => {
+    if (field === 'startTime' && currentBlock?.endTime) {
+      // If changing start time, check if end time is still valid
+      if (!isEndTimeValidForStart(value, currentBlock.endTime)) {
+        // Clear end time if it's now invalid
+        setCurrentBlock({ ...currentBlock, startTime: value, endTime: '' });
+        return;
+      }
+    }
     setCurrentBlock({ ...currentBlock, [field]: value });
   };
 
   const updateEditingBlock = (field, value) => {
+    if (field === 'startTime' && editingBlock?.endTime) {
+      // If changing start time, check if end time is still valid
+      if (!isEndTimeValidForStart(value, editingBlock.endTime)) {
+        // Clear end time if it's now invalid
+        setEditingBlock({ ...editingBlock, startTime: value, endTime: '' });
+        return;
+      }
+    }
     setEditingBlock({ ...editingBlock, [field]: value });
   };
 
@@ -1209,13 +1380,18 @@ function TimeClock() {
     const originalIndex = completedBlocks.findIndex(b => b.id === block.id);
     setEditingOriginalIndex(originalIndex);
 
+    // Store original block state for cancel (deep copy)
+    setEditingBlockOriginal({ ...block });
+
     // Save current block state and edit the selected block
     setEditingBlock(block);
     // Split existing tasks string into array for editing (skip for breaks)
     const tasksArray = block.isBreak ? [''] : (block.tasks ? block.tasks.split(' • ') : ['']);
     setEditingTasks(tasksArray.length > 0 ? tasksArray : ['']);
-    // Remove from completed blocks
-    setCompletedBlocks(completedBlocks.filter(b => b.id !== block.id));
+    // Replace with placeholder instead of removing (keeps position and numbering stable)
+    setCompletedBlocks(completedBlocks.map(b =>
+      b.id === block.id ? { ...b, isEditingPlaceholder: true } : b
+    ));
   };
 
   // Helper to compare times accounting for overnight shifts
@@ -1277,9 +1453,12 @@ function TimeClock() {
   const handleSaveEdit = () => {
     if (!editingBlock) return;
 
+    // Remove placeholder and get clean blocks array
+    const blocksWithoutPlaceholder = completedBlocks.filter(b => !b.isEditingPlaceholder);
+
     // Save original blocks in case we need to restore on gap cancel
     // Include the editing block at its original position
-    const originalBlocks = [...completedBlocks];
+    const originalBlocks = [...blocksWithoutPlaceholder];
     originalBlocks.splice(editingOriginalIndex, 0, editingBlock);
     setBlocksBeforeEdit(originalBlocks);
 
@@ -1293,17 +1472,25 @@ function TimeClock() {
     setSwipingBlockId(editingBlock.id);
 
     setTimeout(() => {
-      const insertIndex = Math.min(editingOriginalIndex, completedBlocks.length);
-      const result = processBlocksAfterEdit(completedBlocks, savedBlock, insertIndex);
+      const insertIndex = Math.min(editingOriginalIndex, blocksWithoutPlaceholder.length);
+      const result = processBlocksAfterEdit(blocksWithoutPlaceholder, savedBlock, insertIndex);
 
       if (result.gap) {
-        // There's a gap - show modal to fill it
+        // There's a gap - animate the gap opening, then show modal
+        setCompletedBlocks(result.blocks);
+        setGapAnimatingIndex(result.gap.gapIndex);
+
+        // Prepare gap data but don't show modal yet
         setGapData({
           ...result.gap,
           pendingBlocks: result.blocks
         });
         setGapTasks(['']);
-        setShowGapModal(true);
+
+        // After animation completes, show the modal (keep gap visible)
+        setTimeout(() => {
+          setShowGapModal(true);
+        }, 500);
       } else {
         setCompletedBlocks(result.blocks);
         setBlocksBeforeEdit(null);
@@ -1317,6 +1504,7 @@ function TimeClock() {
       }
 
       setEditingBlock(null);
+      setEditingBlockOriginal(null);
       setEditingTasks(['']);
       setEditingOriginalIndex(null);
       setSwipingBlockId(null);
@@ -1370,6 +1558,7 @@ function TimeClock() {
     setGapData(null);
     setGapTasks(['']);
     setBlocksBeforeEdit(null);
+    setGapAnimatingIndex(null);
   };
 
   const handleCancelGap = () => {
@@ -1381,17 +1570,18 @@ function TimeClock() {
     setGapData(null);
     setGapTasks(['']);
     setBlocksBeforeEdit(null);
+    setGapAnimatingIndex(null);
   };
 
   const handleCancelEdit = () => {
-    // Restore the editing block to completed at original position
-    if (editingBlock) {
-      const updatedBlocks = [...completedBlocks];
-      const insertIndex = Math.min(editingOriginalIndex ?? updatedBlocks.length, updatedBlocks.length);
-      updatedBlocks.splice(insertIndex, 0, editingBlock);
-      setCompletedBlocks(updatedBlocks);
+    // Replace the placeholder with the original block
+    if (editingBlockOriginal) {
+      setCompletedBlocks(completedBlocks.map(b =>
+        b.isEditingPlaceholder ? editingBlockOriginal : b
+      ));
     }
     setEditingBlock(null);
+    setEditingBlockOriginal(null);
     setEditingTasks(['']);
     setEditingOriginalIndex(null);
   };
@@ -1578,6 +1768,7 @@ function TimeClock() {
       setCurrentTasks(lastBlock.tasks ? [lastBlock.tasks] : ['']);
     }
     setEditingBlock(null);
+    setEditingBlockOriginal(null);
     setEditingTasks(['']);
   };
 
@@ -1586,6 +1777,7 @@ function TimeClock() {
     setCurrentBlock(null);
     setCurrentTasks(['']);
     setEditingBlock(null);
+    setEditingBlockOriginal(null);
     setEditingTasks(['']);
     setPendingShiftId(null);
     setAutoSaveStatus('idle');
@@ -1593,11 +1785,12 @@ function TimeClock() {
 
   const calculateTotalHours = () => {
     let total = 0;
-    [...completedBlocks, currentBlock].filter(Boolean).forEach(block => {
+    // Filter out placeholder blocks to avoid double-counting during editing
+    [...completedBlocks, currentBlock].filter(Boolean).filter(block => !block.isEditingPlaceholder).forEach(block => {
       const hrs = calculateBlockHours(block.startTime, block.endTime);
       if (hrs) total += parseFloat(hrs);
     });
-    return total.toFixed(2);
+    return formatHours(total);
   };
 
   // Preview shift before saving - shows confirmation modal
@@ -1610,7 +1803,9 @@ function TimeClock() {
       allBlocks.push({ ...currentBlock, tasks: currentJoinedTasks });
     }
 
-    const validBlocks = allBlocks.filter(block => block.startTime && block.endTime && block.tasks);
+    const validBlocks = allBlocks.filter(block =>
+      block.startTime && block.endTime && block.tasks && !block.isEditingPlaceholder
+    );
 
     if (validBlocks.length === 0) {
       alert('Please add at least one complete time block (start time, end time, and tasks)');
@@ -1723,7 +1918,7 @@ function TimeClock() {
     } else {
       setCurrentBlock({
         id: Date.now(),
-        startTime: recoveryShift.clockInTime || getActualTime(),
+        startTime: recoveryShift.clockInTime || '', // User must select time if not set
         endTime: '',
         tasks: ''
       });
@@ -1782,7 +1977,7 @@ function TimeClock() {
         recoveryShift.id,
         clockInTime,
         clockOutTime,
-        totalHours.toFixed(2)
+        formatHours(totalHours)
       );
 
       // Add to shifts list
@@ -1890,26 +2085,28 @@ function TimeClock() {
     <div className="app">
       {/* Toast Notification */}
       {toast && (
-        <div className="toast">
+        <div className={`toast ${toast.type || ''}`}>
           <div className="toast-header">
             <span className="toast-message">{toast.message}</span>
             <button className="toast-close" onClick={() => setToast(null)}>&times;</button>
           </div>
-          <div className="toast-preview">
-            <div className="toast-date">{formatDate(toast.shift.date)}</div>
-            <div className="toast-times">
-              {formatTime(toast.shift.clockInTime)} - {formatTime(toast.shift.clockOutTime)}
+          {toast.shift && (
+            <div className="toast-preview">
+              <div className="toast-date">{formatDate(toast.shift.date)}</div>
+              <div className="toast-times">
+                {formatTime(toast.shift.clockInTime)} - {formatTime(toast.shift.clockOutTime)}
+              </div>
+              <div className="toast-hours">{toast.shift.totalHours} hours</div>
+              <div className="toast-blocks">
+                {toast.shift.timeBlocks.filter(b => !b.isBreak).slice(0, 3).map((b, i) => (
+                  <div key={i} className="toast-block-item">{b.tasks}</div>
+                ))}
+                {toast.shift.timeBlocks.filter(b => !b.isBreak).length > 3 && (
+                  <div className="toast-more">+{toast.shift.timeBlocks.filter(b => !b.isBreak).length - 3} more</div>
+                )}
+              </div>
             </div>
-            <div className="toast-hours">{toast.shift.totalHours} hours</div>
-            <div className="toast-blocks">
-              {toast.shift.timeBlocks.filter(b => !b.isBreak).slice(0, 3).map((b, i) => (
-                <div key={i} className="toast-block-item">{b.tasks}</div>
-              ))}
-              {toast.shift.timeBlocks.filter(b => !b.isBreak).length > 3 && (
-                <div className="toast-more">+{toast.shift.timeBlocks.filter(b => !b.isBreak).length - 3} more</div>
-              )}
-            </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -2291,6 +2488,35 @@ function TimeClock() {
         </div>
       )}
 
+      {/* Cancel Shift Confirmation Modal */}
+      {showCancelShiftConfirm && (
+        <div className="modal-overlay">
+          <div className="preview-modal cancel-shift-modal">
+            <div className="modal-header">
+              <h2>Cancel Shift?</h2>
+            </div>
+            <div className="modal-body">
+              <p className="cancel-warning">Are you sure you want to cancel this shift?</p>
+              <p className="cancel-subtext">
+                This will permanently delete {completedBlocks.length} completed block(s)
+                {currentBlock ? ' and your current block in progress' : ''}.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn-cancel-modal"
+                onClick={() => setShowCancelShiftConfirm(false)}
+              >
+                Go Back
+              </button>
+              <button className="btn-danger" onClick={handleCancelShift}>
+                Yes, Cancel Shift
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Auto-save indicator */}
       {autoSaveStatus !== 'idle' && (
         <div className={`auto-save-indicator ${autoSaveStatus}`}>
@@ -2355,17 +2581,6 @@ function TimeClock() {
                 )}
               </div>
               <div className="test-row">
-                <span className="now-offset-label">Block +</span>
-                <select value={nowOffsetHours} onChange={(e) => setNowOffsetHours(Number(e.target.value))}>
-                  {[0, 1, 2, 3, 4, 5].map(n => (
-                    <option key={n} value={n}>{n}h</option>
-                  ))}
-                </select>
-                <select value={nowOffsetMins} onChange={(e) => setNowOffsetMins(Number(e.target.value))}>
-                  {[0, 15, 30, 45].map(n => (
-                    <option key={n} value={n}>{n}m</option>
-                  ))}
-                </select>
                 <button
                   type="button"
                   className="btn-random-task"
@@ -2539,45 +2754,266 @@ function TimeClock() {
                   <div className="block-times">
                     <div className="time-field">
                       <label>Start</label>
-                      <div className="time-input-group">
-                        <input
-                          type="time"
-                          value={editingBlock.startTime}
-                          onChange={(e) => updateEditingBlock('startTime', e.target.value)}
-                        />
+                      <div className="time-picker-group">
+                        {(() => {
+                          const parseTime = (timeStr) => {
+                            if (!timeStr) return { hour: '', minute: '', period: 'AM' };
+                            const [h, m] = timeStr.split(':').map(Number);
+                            return {
+                              hour: h === 0 ? 12 : h > 12 ? h - 12 : h,
+                              minute: String(m).padStart(2, '0'),
+                              period: h >= 12 ? 'PM' : 'AM'
+                            };
+                          };
+                          const buildTime = (hour, minute, period) => {
+                            if (!hour || minute === '') return '';
+                            let h = parseInt(hour);
+                            if (period === 'AM' && h === 12) h = 0;
+                            else if (period === 'PM' && h !== 12) h += 12;
+                            return `${String(h).padStart(2, '0')}:${minute}`;
+                          };
+                          const parsed = parseTime(editingBlock.startTime);
+                          return (
+                            <>
+                              <select
+                                value={parsed.hour}
+                                onChange={(e) => updateEditingBlock('startTime', buildTime(e.target.value, parsed.minute || '00', parsed.period))}
+                                className="time-select hour-select"
+                              >
+                                <option value="">--</option>
+                                {[1,2,3,4,5,6,7,8,9,10,11,12].map(h => (
+                                  <option key={h} value={h}>{h}</option>
+                                ))}
+                              </select>
+                              <span className="time-separator">:</span>
+                              <select
+                                value={parsed.minute}
+                                onChange={(e) => updateEditingBlock('startTime', buildTime(parsed.hour || 12, e.target.value, parsed.period))}
+                                className="time-select minute-select"
+                              >
+                                <option value="">--</option>
+                                <option value="00">00</option>
+                                <option value="15">15</option>
+                                <option value="30">30</option>
+                                <option value="45">45</option>
+                              </select>
+                              <div className="period-toggle">
+                                <button
+                                  type="button"
+                                  className={`period-btn ${parsed.period === 'AM' ? 'active' : ''}`}
+                                  onClick={() => parsed.hour && updateEditingBlock('startTime', buildTime(parsed.hour, parsed.minute || '00', 'AM'))}
+                                >AM</button>
+                                <button
+                                  type="button"
+                                  className={`period-btn ${parsed.period === 'PM' ? 'active' : ''}`}
+                                  onClick={() => parsed.hour && updateEditingBlock('startTime', buildTime(parsed.hour, parsed.minute || '00', 'PM'))}
+                                >PM</button>
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
                     <div className="time-field">
                       <label>End</label>
-                      <div className="time-input-group">
-                        <input
-                          type="time"
-                          value={editingBlock.endTime}
-                          onChange={(e) => updateEditingBlock('endTime', e.target.value)}
-                        />
-                        <button
-                          type="button"
-                          className="btn-now"
-                          onClick={() => updateEditingBlock('endTime', getEndTimeWithOffset(editingBlock.startTime))}
-                        >
-                          Now{(nowOffsetHours > 0 || nowOffsetMins > 0) ? '+' : ''}
-                        </button>
-                      </div>
-                      <div className="time-increment-btns">
-                        <button
-                          type="button"
-                          className="btn-increment"
-                          onClick={() => incrementEndTime(editingBlock, updateEditingBlock, 15)}
-                        >
-                          +15m
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-increment"
-                          onClick={() => incrementEndTime(editingBlock, updateEditingBlock, 60)}
-                        >
-                          +1hr
-                        </button>
+                      <div className="time-picker-group">
+                        {(() => {
+                          const getStartPeriod = () => {
+                            if (!editingBlock.startTime) return 'AM';
+                            const [h] = editingBlock.startTime.split(':').map(Number);
+                            return h >= 12 ? 'PM' : 'AM';
+                          };
+                          const parseTime = (timeStr) => {
+                            if (!timeStr) return { hour: '', minute: '', period: getStartPeriod() };
+                            const [h, m] = timeStr.split(':').map(Number);
+                            return {
+                              hour: h === 0 ? 12 : h > 12 ? h - 12 : h,
+                              minute: String(m).padStart(2, '0'),
+                              period: h >= 12 ? 'PM' : 'AM'
+                            };
+                          };
+                          const buildTime = (hour, minute, period) => {
+                            if (!hour || minute === '') return '';
+                            let h = parseInt(hour);
+                            if (period === 'AM' && h === 12) h = 0;
+                            else if (period === 'PM' && h !== 12) h += 12;
+                            return `${String(h).padStart(2, '0')}:${minute}`;
+                          };
+
+                          // Smart end time validation
+                          const getEndTimeConfig = () => {
+                            const fallback = {
+                              hours: [1,2,3,4,5,6,7,8,9,10,11,12],
+                              getPeriodForHour: () => getStartPeriod(),
+                              getMinutesForHour: () => ['00','15','30','45'],
+                              canTogglePeriod: () => false
+                            };
+                            if (!editingBlock.startTime) return fallback;
+
+                            const startParsed = parseTime(editingBlock.startTime);
+                            const startH = startParsed.hour;
+                            const startM = parseInt(startParsed.minute || '0');
+                            const startP = startParsed.period;
+                            if (!startH) return fallback;
+
+                            // Convert start to total minutes
+                            let start24 = startH;
+                            if (startP === 'AM' && startH === 12) start24 = 0;
+                            else if (startP === 'PM' && startH !== 12) start24 += 12;
+                            const startTotalMins = start24 * 60 + startM;
+
+                            // Check for next block constraint (can't overlap)
+                            let maxEndMins = null;
+                            if (editingOriginalIndex !== null && completedBlocks[editingOriginalIndex]) {
+                              const nextBlock = completedBlocks[editingOriginalIndex];
+                              if (nextBlock.startTime) {
+                                const [nh, nm] = nextBlock.startTime.split(':').map(Number);
+                                maxEndMins = nh * 60 + nm;
+                                // Handle overnight: if next block starts before current start, it's next day
+                                if (maxEndMins <= startTotalMins) maxEndMins += 24 * 60;
+                              }
+                            }
+
+                            // Helper to check if end time is valid (within 2hr and not overlapping next block)
+                            const isValidEndTime = (endTotalMins) => {
+                              let adjEndMins = endTotalMins;
+                              if (adjEndMins <= startTotalMins) adjEndMins += 24 * 60;
+                              const diff = adjEndMins - startTotalMins;
+                              if (diff < 15 || diff > 120) return false;
+                              if (maxEndMins !== null && adjEndMins > maxEndMins) return false;
+                              return true;
+                            };
+
+                            // Calculate valid end hours (wrap around 12)
+                            const h1 = startH;
+                            const h2 = h1 === 12 ? 1 : h1 + 1;
+                            const h3 = h2 === 12 ? 1 : h2 + 1;
+                            // Filter hours that have at least one valid minute
+                            const potentialHours = startM === 45 ? [h2, h3] : [h1, h2, h3];
+
+                            // Get the correct period for a given end hour
+                            const getPeriodForHour = (endH) => {
+                              for (const p of [startP, startP === 'AM' ? 'PM' : 'AM']) {
+                                let end24 = endH;
+                                if (p === 'AM' && endH === 12) end24 = 0;
+                                else if (p === 'PM' && endH !== 12) end24 += 12;
+                                for (const m of [0, 15, 30, 45]) {
+                                  const endTotalMins = end24 * 60 + m;
+                                  if (isValidEndTime(endTotalMins)) return p;
+                                }
+                              }
+                              return startP;
+                            };
+
+                            // Get valid minutes for a given end hour
+                            const getMinutesForHour = (endH) => {
+                              const endP = getPeriodForHour(endH);
+                              let end24 = endH;
+                              if (endP === 'AM' && endH === 12) end24 = 0;
+                              else if (endP === 'PM' && endH !== 12) end24 += 12;
+                              const validMins = [];
+                              for (const m of ['00', '15', '30', '45']) {
+                                const endTotalMins = end24 * 60 + parseInt(m);
+                                if (isValidEndTime(endTotalMins)) validMins.push(m);
+                              }
+                              return validMins;
+                            };
+
+                            // Filter hours to only those with valid minutes
+                            const hours = potentialHours.filter(h => getMinutesForHour(h).length > 0);
+
+                            // Check if period toggle should be enabled (only if hour could cross noon/midnight)
+                            const canTogglePeriod = (endH) => {
+                              let validInStart = false, validInOpp = false;
+                              const oppP = startP === 'AM' ? 'PM' : 'AM';
+                              for (const m of [0, 15, 30, 45]) {
+                                // Check start period
+                                let end24s = endH;
+                                if (startP === 'AM' && endH === 12) end24s = 0;
+                                else if (startP === 'PM' && endH !== 12) end24s += 12;
+                                if (isValidEndTime(end24s * 60 + m)) validInStart = true;
+                                // Check opposite period
+                                let end24o = endH;
+                                if (oppP === 'AM' && endH === 12) end24o = 0;
+                                else if (oppP === 'PM' && endH !== 12) end24o += 12;
+                                if (isValidEndTime(end24o * 60 + m)) validInOpp = true;
+                              }
+                              return validInStart && validInOpp;
+                            };
+
+                            return { hours, getPeriodForHour, getMinutesForHour, canTogglePeriod };
+                          };
+
+                          const endConfig = getEndTimeConfig();
+                          const parsed = parseTime(editingBlock.endTime);
+                          // Only use selected values if they're in valid lists
+                          const selectedHour = parsed.hour && endConfig.hours.includes(parsed.hour) ? parsed.hour : '';
+                          const tempValidMinutes = selectedHour ? endConfig.getMinutesForHour(selectedHour) : [];
+                          const selectedMinute = parsed.minute && tempValidMinutes.includes(parsed.minute) ? parsed.minute : '';
+                          const correctPeriod = selectedHour ? endConfig.getPeriodForHour(selectedHour) : getStartPeriod();
+                          const validMinutes = selectedHour ? endConfig.getMinutesForHour(selectedHour) : ['00','15','30','45'];
+                          const showPeriodToggle = selectedHour && endConfig.canTogglePeriod(selectedHour);
+
+                          return (
+                            <>
+                              <select
+                                value={selectedHour}
+                                onChange={(e) => {
+                                  const newHour = e.target.value;
+                                  if (!newHour) {
+                                    updateEditingBlock('endTime', '');
+                                    return;
+                                  }
+                                  const period = endConfig.getPeriodForHour(parseInt(newHour));
+                                  const mins = endConfig.getMinutesForHour(parseInt(newHour));
+                                  const minute = mins.includes(parsed.minute) ? parsed.minute : mins[0] || '00';
+                                  updateEditingBlock('endTime', buildTime(newHour, minute, period));
+                                }}
+                                className="time-select hour-select"
+                              >
+                                <option value="">--</option>
+                                {endConfig.hours.map(h => (
+                                  <option key={h} value={h}>{h}</option>
+                                ))}
+                              </select>
+                              <span className="time-separator">:</span>
+                              <select
+                                value={selectedMinute}
+                                onChange={(e) => {
+                                  updateEditingBlock('endTime', buildTime(selectedHour || endConfig.hours[0], e.target.value, correctPeriod));
+                                }}
+                                className="time-select minute-select"
+                              >
+                                <option value="">--</option>
+                                {validMinutes.map(m => (
+                                  <option key={m} value={m}>{m}</option>
+                                ))}
+                              </select>
+                              <div className="period-toggle">
+                                <button
+                                  type="button"
+                                  className={`period-btn ${correctPeriod === 'AM' ? 'active' : ''}`}
+                                  disabled={!showPeriodToggle}
+                                  onClick={() => {
+                                    if (selectedHour && showPeriodToggle) {
+                                      updateEditingBlock('endTime', buildTime(selectedHour, selectedMinute || '00', 'AM'));
+                                    }
+                                  }}
+                                >AM</button>
+                                <button
+                                  type="button"
+                                  className={`period-btn ${correctPeriod === 'PM' ? 'active' : ''}`}
+                                  disabled={!showPeriodToggle}
+                                  onClick={() => {
+                                    if (selectedHour && showPeriodToggle) {
+                                      updateEditingBlock('endTime', buildTime(selectedHour, selectedMinute || '00', 'PM'));
+                                    }
+                                  }}
+                                >PM</button>
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -2585,32 +3021,39 @@ function TimeClock() {
                   {!editingBlock.isBreak && (
                     <div className="task-field">
                       <label>Tasks</label>
-                      {editingTasks.map((task, index) => (
-                        <div key={index} className="task-input-row">
-                          <input
-                            type="text"
-                            value={task}
-                            onChange={(e) => {
-                              const newTasks = [...editingTasks];
-                              newTasks[index] = e.target.value;
-                              setEditingTasks(newTasks);
-                            }}
-                            placeholder={index === 0 ? "What did you work on?" : "Another task..."}
-                          />
-                          {editingTasks.length > 1 && (
-                            <button
-                              type="button"
-                              className="btn-remove-task"
-                              onClick={() => {
-                                const newTasks = editingTasks.filter((_, i) => i !== index);
-                                setEditingTasks(newTasks);
-                              }}
-                            >
-                              −
-                            </button>
-                          )}
-                        </div>
-                      ))}
+                      {editingTasks.map((task, index) => {
+                        const isPreset = isPresetTask(task);
+                        return (
+                          <div key={index} className={`task-input-row ${isPreset ? 'preset-task-row' : ''}`}>
+                            {isPreset ? (
+                              <div className="preset-task-display">{task}</div>
+                            ) : (
+                              <input
+                                type="text"
+                                value={task}
+                                onChange={(e) => {
+                                  const newTasks = [...editingTasks];
+                                  newTasks[index] = e.target.value;
+                                  setEditingTasks(newTasks);
+                                }}
+                                placeholder={index === 0 ? "What did you work on?" : "Another task..."}
+                              />
+                            )}
+                            {(editingTasks.length > 1 || isPreset) && (
+                              <button
+                                type="button"
+                                className="btn-remove-task"
+                                onClick={() => {
+                                  const newTasks = editingTasks.filter((_, i) => i !== index);
+                                  setEditingTasks(newTasks.length === 0 ? [''] : newTasks);
+                                }}
+                              >
+                                −
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
                       <button
                         type="button"
                         className="btn-add-task"
@@ -2633,89 +3076,392 @@ function TimeClock() {
                         {calculateBlockHours(currentBlock.startTime, currentBlock.endTime)} hrs
                       </span>
                     )}
+                    {(currentBlock.startTime || currentBlock.endTime) && completedBlocks.length === 0 && (
+                      <button
+                        type="button"
+                        className="btn-clear-block"
+                        onClick={() => setCurrentBlock({ ...currentBlock, startTime: '', endTime: '' })}
+                      >
+                        Clear Times
+                      </button>
+                    )}
                   </div>
                   <div className="block-times">
                     <div className="time-field">
-                      <label>Start{completedBlocks.length > 0 }</label>
-                      <div className="time-input-group">
-                        <input
-                          type="time"
-                          value={currentBlock.startTime}
-                          onChange={(e) => !completedBlocks.length && updateCurrentBlock('startTime', e.target.value)}
-                          readOnly={completedBlocks.length > 0}
-                          className={completedBlocks.length > 0 ? 'locked-input' : ''}
-                        />
+                      <label>Start</label>
+                      <div className="time-picker-group">
+                        {(() => {
+                          const parseTime = (timeStr) => {
+                            if (!timeStr) return { hour: '', minute: '', period: 'AM' };
+                            const [h, m] = timeStr.split(':').map(Number);
+                            return {
+                              hour: h === 0 ? 12 : h > 12 ? h - 12 : h,
+                              minute: String(m).padStart(2, '0'),
+                              period: h >= 12 ? 'PM' : 'AM'
+                            };
+                          };
+                          const buildTime = (hour, minute, period) => {
+                            if (!hour || minute === '') return '';
+                            let h = parseInt(hour);
+                            if (period === 'AM' && h === 12) h = 0;
+                            else if (period === 'PM' && h !== 12) h += 12;
+                            return `${String(h).padStart(2, '0')}:${minute}`;
+                          };
+                          const parsed = parseTime(currentBlock.startTime);
+                          const isLocked = completedBlocks.length > 0;
+                          return (
+                            <>
+                              <select
+                                value={parsed.hour}
+                                onChange={(e) => !isLocked && updateCurrentBlock('startTime', buildTime(e.target.value, parsed.minute || '00', parsed.period))}
+                                disabled={isLocked}
+                                className={`time-select hour-select ${isLocked ? 'locked-input' : ''}`}
+                              >
+                                <option value="">--</option>
+                                {[1,2,3,4,5,6,7,8,9,10,11,12].map(h => (
+                                  <option key={h} value={h}>{h}</option>
+                                ))}
+                              </select>
+                              <span className="time-separator">:</span>
+                              <select
+                                value={parsed.minute}
+                                onChange={(e) => !isLocked && updateCurrentBlock('startTime', buildTime(parsed.hour || 12, e.target.value, parsed.period))}
+                                disabled={isLocked}
+                                className={`time-select minute-select ${isLocked ? 'locked-input' : ''}`}
+                              >
+                                <option value="">--</option>
+                                <option value="00">00</option>
+                                <option value="15">15</option>
+                                <option value="30">30</option>
+                                <option value="45">45</option>
+                              </select>
+                              <div className="period-toggle">
+                                <button
+                                  type="button"
+                                  className={`period-btn ${parsed.period === 'AM' ? 'active' : ''}`}
+                                  onClick={() => !isLocked && parsed.hour && updateCurrentBlock('startTime', buildTime(parsed.hour, parsed.minute || '00', 'AM'))}
+                                  disabled={isLocked}
+                                >AM</button>
+                                <button
+                                  type="button"
+                                  className={`period-btn ${parsed.period === 'PM' ? 'active' : ''}`}
+                                  onClick={() => !isLocked && parsed.hour && updateCurrentBlock('startTime', buildTime(parsed.hour, parsed.minute || '00', 'PM'))}
+                                  disabled={isLocked}
+                                >PM</button>
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
                     <div className="time-field">
                       <label>End</label>
-                      <div className="time-input-group">
-                        <input
-                          type="time"
-                          value={currentBlock.endTime}
-                          onChange={(e) => updateCurrentBlock('endTime', e.target.value)}
-                        />
-                        <button
-                          type="button"
-                          className="btn-now"
-                          onClick={() => updateCurrentBlock('endTime', getEndTimeWithOffset(currentBlock.startTime))}
-                        >
-                          Now{(nowOffsetHours > 0 || nowOffsetMins > 0) ? '+' : ''}
-                        </button>
-                      </div>
-                      <div className="time-increment-btns">
-                        <button
-                          type="button"
-                          className="btn-increment"
-                          onClick={() => incrementEndTime(currentBlock, updateCurrentBlock, 15)}
-                        >
-                          +15m
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-increment"
-                          onClick={() => incrementEndTime(currentBlock, updateCurrentBlock, 60)}
-                        >
-                          +1hr
-                        </button>
+                      <div className="time-picker-group">
+                        {(() => {
+                          // Get start time's period to use as default
+                          const getStartPeriod = () => {
+                            if (!currentBlock.startTime) return 'AM';
+                            const [h] = currentBlock.startTime.split(':').map(Number);
+                            return h >= 12 ? 'PM' : 'AM';
+                          };
+                          const parseTime = (timeStr) => {
+                            if (!timeStr) return { hour: '', minute: '', period: getStartPeriod() };
+                            const [h, m] = timeStr.split(':').map(Number);
+                            return {
+                              hour: h === 0 ? 12 : h > 12 ? h - 12 : h,
+                              minute: String(m).padStart(2, '0'),
+                              period: h >= 12 ? 'PM' : 'AM'
+                            };
+                          };
+                          const buildTime = (hour, minute, period) => {
+                            if (!hour || minute === '') return '';
+                            let h = parseInt(hour);
+                            if (period === 'AM' && h === 12) h = 0;
+                            else if (period === 'PM' && h !== 12) h += 12;
+                            return `${String(h).padStart(2, '0')}:${minute}`;
+                          };
+
+                          // Smart end time validation
+                          const getEndTimeConfig = () => {
+                            const fallback = {
+                              hours: [1,2,3,4,5,6,7,8,9,10,11,12],
+                              getPeriodForHour: () => getStartPeriod(),
+                              getMinutesForHour: () => ['00','15','30','45'],
+                              canTogglePeriod: () => false
+                            };
+                            if (!currentBlock.startTime) return fallback;
+
+                            const startParsed = parseTime(currentBlock.startTime);
+                            const startH = startParsed.hour;
+                            const startM = parseInt(startParsed.minute || '0');
+                            const startP = startParsed.period;
+                            if (!startH) return fallback;
+
+                            // Convert start to total minutes
+                            let start24 = startH;
+                            if (startP === 'AM' && startH === 12) start24 = 0;
+                            else if (startP === 'PM' && startH !== 12) start24 += 12;
+                            const startTotalMins = start24 * 60 + startM;
+
+                            // Calculate valid end hours (wrap around 12)
+                            const h1 = startH;
+                            const h2 = h1 === 12 ? 1 : h1 + 1;
+                            const h3 = h2 === 12 ? 1 : h2 + 1;
+                            // If startM is 45, h1 has no valid minutes (min 15 mins required)
+                            const hours = startM === 45 ? [h2, h3] : [h1, h2, h3];
+
+                            // Get the correct period for a given end hour
+                            const getPeriodForHour = (endH) => {
+                              for (const p of [startP, startP === 'AM' ? 'PM' : 'AM']) {
+                                let end24 = endH;
+                                if (p === 'AM' && endH === 12) end24 = 0;
+                                else if (p === 'PM' && endH !== 12) end24 += 12;
+                                for (const m of [0, 15, 30, 45]) {
+                                  let endTotalMins = end24 * 60 + m;
+                                  if (endTotalMins <= startTotalMins) endTotalMins += 24 * 60;
+                                  const diff = endTotalMins - startTotalMins;
+                                  if (diff >= 15 && diff <= 120) return p;
+                                }
+                              }
+                              return startP;
+                            };
+
+                            // Get valid minutes for a given end hour
+                            const getMinutesForHour = (endH) => {
+                              const endP = getPeriodForHour(endH);
+                              let end24 = endH;
+                              if (endP === 'AM' && endH === 12) end24 = 0;
+                              else if (endP === 'PM' && endH !== 12) end24 += 12;
+                              const validMins = [];
+                              for (const m of ['00', '15', '30', '45']) {
+                                let endTotalMins = end24 * 60 + parseInt(m);
+                                if (endTotalMins <= startTotalMins) endTotalMins += 24 * 60;
+                                const diff = endTotalMins - startTotalMins;
+                                if (diff >= 15 && diff <= 120) validMins.push(m);
+                              }
+                              return validMins;
+                            };
+
+                            // Check if period toggle should be enabled (only if hour could cross noon/midnight)
+                            const canTogglePeriod = (endH) => {
+                              let validInStart = false, validInOpp = false;
+                              const oppP = startP === 'AM' ? 'PM' : 'AM';
+                              for (const m of [0, 15, 30, 45]) {
+                                // Check start period
+                                let end24s = endH;
+                                if (startP === 'AM' && endH === 12) end24s = 0;
+                                else if (startP === 'PM' && endH !== 12) end24s += 12;
+                                let endMinsS = end24s * 60 + m;
+                                if (endMinsS <= startTotalMins) endMinsS += 24 * 60;
+                                if ((endMinsS - startTotalMins) >= 15 && (endMinsS - startTotalMins) <= 120) validInStart = true;
+                                // Check opposite period
+                                let end24o = endH;
+                                if (oppP === 'AM' && endH === 12) end24o = 0;
+                                else if (oppP === 'PM' && endH !== 12) end24o += 12;
+                                let endMinsO = end24o * 60 + m;
+                                if (endMinsO <= startTotalMins) endMinsO += 24 * 60;
+                                if ((endMinsO - startTotalMins) >= 15 && (endMinsO - startTotalMins) <= 120) validInOpp = true;
+                              }
+                              return validInStart && validInOpp;
+                            };
+
+                            return { hours, getPeriodForHour, getMinutesForHour, canTogglePeriod };
+                          };
+
+                          const endConfig = getEndTimeConfig();
+                          const parsed = parseTime(currentBlock.endTime);
+                          // Only use selected values if they're in valid lists
+                          const selectedHour = parsed.hour && endConfig.hours.includes(parsed.hour) ? parsed.hour : '';
+                          const tempValidMinutes = selectedHour ? endConfig.getMinutesForHour(selectedHour) : [];
+                          const selectedMinute = parsed.minute && tempValidMinutes.includes(parsed.minute) ? parsed.minute : '';
+                          const correctPeriod = selectedHour ? endConfig.getPeriodForHour(selectedHour) : getStartPeriod();
+                          const validMinutes = selectedHour ? endConfig.getMinutesForHour(selectedHour) : ['00','15','30','45'];
+                          const showPeriodToggle = selectedHour && endConfig.canTogglePeriod(selectedHour);
+
+                          return (
+                            <>
+                              <select
+                                value={selectedHour}
+                                onChange={(e) => {
+                                  const newHour = e.target.value;
+                                  if (!newHour) {
+                                    updateCurrentBlock('endTime', '');
+                                    return;
+                                  }
+                                  const period = endConfig.getPeriodForHour(parseInt(newHour));
+                                  const mins = endConfig.getMinutesForHour(parseInt(newHour));
+                                  const minute = mins.includes(parsed.minute) ? parsed.minute : mins[0] || '00';
+                                  updateCurrentBlock('endTime', buildTime(newHour, minute, period));
+                                }}
+                                className="time-select hour-select"
+                              >
+                                <option value="">--</option>
+                                {endConfig.hours.map(h => (
+                                  <option key={h} value={h}>{h}</option>
+                                ))}
+                              </select>
+                              <span className="time-separator">:</span>
+                              <select
+                                value={selectedMinute}
+                                onChange={(e) => {
+                                  updateCurrentBlock('endTime', buildTime(selectedHour || endConfig.hours[0], e.target.value, correctPeriod));
+                                }}
+                                className="time-select minute-select"
+                              >
+                                <option value="">--</option>
+                                {validMinutes.map(m => (
+                                  <option key={m} value={m}>{m}</option>
+                                ))}
+                              </select>
+                              <div className="period-toggle">
+                                <button
+                                  type="button"
+                                  className={`period-btn ${correctPeriod === 'AM' ? 'active' : ''}`}
+                                  disabled={!showPeriodToggle}
+                                  onClick={() => {
+                                    if (selectedHour && showPeriodToggle) {
+                                      updateCurrentBlock('endTime', buildTime(selectedHour, selectedMinute || '00', 'AM'));
+                                    }
+                                  }}
+                                >AM</button>
+                                <button
+                                  type="button"
+                                  className={`period-btn ${correctPeriod === 'PM' ? 'active' : ''}`}
+                                  disabled={!showPeriodToggle}
+                                  onClick={() => {
+                                    if (selectedHour && showPeriodToggle) {
+                                      updateCurrentBlock('endTime', buildTime(selectedHour, selectedMinute || '00', 'PM'));
+                                    }
+                                  }}
+                                >PM</button>
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
                   <div className="task-field">
                     <label>Tasks</label>
-                    {currentTasks.map((task, index) => (
-                      <div key={index} className="task-input-row">
-                        <input
-                          type="text"
-                          value={task}
-                          onChange={(e) => {
-                            const newTasks = [...currentTasks];
-                            newTasks[index] = e.target.value;
-                            setCurrentTasks(newTasks);
-                          }}
-                          placeholder={index === 0 ? "What did you work on?" : "Another task..."}
-                        />
-                        {currentTasks.length > 1 && (
-                          <button
-                            type="button"
-                            className="btn-remove-task"
-                            onClick={() => {
-                              const newTasks = currentTasks.filter((_, i) => i !== index);
-                              setCurrentTasks(newTasks);
-                            }}
-                          >
-                            −
-                          </button>
+                    {currentTasks.map((task, index) => {
+                      const isPreset = isPresetTask(task);
+                      return (
+                        <div key={index} className={`task-input-row ${isPreset ? 'preset-task-row' : ''}`}>
+                          {isPreset ? (
+                            <div className="preset-task-display">{task}</div>
+                          ) : (
+                            <input
+                              type="text"
+                              value={task}
+                              onChange={(e) => {
+                                const newTasks = [...currentTasks];
+                                newTasks[index] = e.target.value;
+                                setCurrentTasks(newTasks);
+                              }}
+                              placeholder={index === 0 ? "What did you work on?" : "Another task..."}
+                            />
+                          )}
+                          {(currentTasks.length > 1 || isPreset) && (
+                            <button
+                              type="button"
+                              className="btn-remove-task"
+                              onClick={() => {
+                                const newTasks = currentTasks.filter((_, i) => i !== index);
+                                setCurrentTasks(newTasks.length === 0 ? [''] : newTasks);
+                              }}
+                            >
+                              −
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                    <div className="task-actions-row">
+                      <button
+                        type="button"
+                        className="btn-add-task"
+                        onClick={() => setCurrentTasks([...currentTasks, ''])}
+                      >
+                        + Add Task
+                      </button>
+                      <div className="preset-tasks">
+                        {pendingPreset ? (
+                          <div className="preset-detail-input">
+                            <span className="preset-label">{pendingPreset} -</span>
+                            <input
+                              type="text"
+                              value={presetDetail}
+                              onChange={(e) => setPresetDetail(e.target.value)}
+                              placeholder="Project Name"
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && presetDetail.trim()) {
+                                  const fullTask = `${pendingPreset} - ${presetDetail.trim()}`;
+                                  const emptyIdx = currentTasks.findIndex(t => !t.trim());
+                                  if (emptyIdx >= 0) {
+                                    const newTasks = [...currentTasks];
+                                    newTasks[emptyIdx] = fullTask;
+                                    setCurrentTasks(newTasks);
+                                  } else {
+                                    setCurrentTasks([...currentTasks, fullTask]);
+                                  }
+                                  setPendingPreset(null);
+                                  setPresetDetail('');
+                                } else if (e.key === 'Escape') {
+                                  setPendingPreset(null);
+                                  setPresetDetail('');
+                                }
+                              }}
+                            />
+                            <button
+                              type="button"
+                              className="btn-preset-confirm"
+                              onClick={() => {
+                                if (presetDetail.trim()) {
+                                  const fullTask = `${pendingPreset} - ${presetDetail.trim()}`;
+                                  const emptyIdx = currentTasks.findIndex(t => !t.trim());
+                                  if (emptyIdx >= 0) {
+                                    const newTasks = [...currentTasks];
+                                    newTasks[emptyIdx] = fullTask;
+                                    setCurrentTasks(newTasks);
+                                  } else {
+                                    setCurrentTasks([...currentTasks, fullTask]);
+                                  }
+                                  setPendingPreset(null);
+                                  setPresetDetail('');
+                                }
+                              }}
+                            >
+                              ✓
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-preset-cancel"
+                              onClick={() => {
+                                setPendingPreset(null);
+                                setPresetDetail('');
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          PRESET_TASK_NAMES.map(preset => (
+                            <button
+                              key={preset}
+                              type="button"
+                              className="btn-preset-task"
+                              onClick={() => {
+                                setPendingPreset(preset);
+                                setPresetDetail('');
+                              }}
+                            >
+                              {preset}
+                            </button>
+                          ))
                         )}
                       </div>
-                    ))}
-                    <button
-                      type="button"
-                      className="btn-add-task"
-                      onClick={() => setCurrentTasks([...currentTasks, ''])}
-                    >
-                      + Add Task
-                    </button>
+                    </div>
                   </div>
                   <div className="block-actions">
                     {!currentBlock.isBreak && (
@@ -2727,7 +3473,12 @@ function TimeClock() {
                       type="button"
                       className="btn-advance"
                       onClick={handleAdvanceBlock}
-                      disabled={!currentBlock.endTime || !currentTasks.some(t => t.trim())}
+                      disabled={
+                        !currentBlock.endTime ||
+                        !currentTasks.some(t => t.trim()) ||
+                        currentBlock.startTime === currentBlock.endTime ||
+                        (calculateBlockHours(currentBlock.startTime, currentBlock.endTime) > 3)
+                      }
                     >
                       Next Block →
                     </button>
@@ -2748,14 +3499,32 @@ function TimeClock() {
                 <span>Total Hours:</span>
                 <strong>{calculateTotalHours()}</strong>
               </div>
-              <button
-                type="button"
-                className="btn-save"
-                onClick={previewShift}
-                disabled={(completedBlocks.length === 0 && !currentBlock) || saving}
-              >
-                {saving ? 'Saving...' : 'Clock Out'}
-              </button>
+              <div className="shift-summary-actions">
+                {(currentBlock || completedBlocks.length > 0) && (
+                  <button
+                    type="button"
+                    className="btn-cancel-shift"
+                    onClick={() => {
+                      // Skip confirmation if no blocks saved yet
+                      if (completedBlocks.length === 0) {
+                        handleCancelShift();
+                      } else {
+                        setShowCancelShiftConfirm(true);
+                      }
+                    }}
+                  >
+                    Cancel Shift
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn-save"
+                  onClick={previewShift}
+                  disabled={(completedBlocks.length === 0 && !currentBlock) || saving}
+                >
+                  {saving ? 'Saving...' : 'Clock Out'}
+                </button>
+              </div>
             </div>
           </section>
 
@@ -2767,49 +3536,75 @@ function TimeClock() {
                 <p>Blocks will appear here as you complete them</p>
               </div>
             ) : (
-              <div className="completed-list">
+              <div className={`completed-list ${completedBlocks.length >= 10 ? 'compact-mode' : ''}`}>
                 {completedBlocks.map((block, index) => {
-                  // Count only work blocks for numbering
+                  // Count only work blocks for numbering (include placeholders to keep numbers stable)
                   const workBlockNumber = completedBlocks
                     .slice(0, index + 1)
                     .filter(b => !b.isBreak).length;
+
+                  // Gap animation classes
+                  const isBeforeGap = gapAnimatingIndex !== null && index === gapAnimatingIndex - 1;
+                  const isAfterGap = gapAnimatingIndex !== null && index === gapAnimatingIndex;
+
+                  // Show placeholder for blocks being edited
+                  if (block.isEditingPlaceholder) {
+                    return (
+                      <div key={block.id} className="completed-block editing-placeholder">
+                        <div className="placeholder-content">
+                          <span className="placeholder-label">
+                            {block.isBreak ? 'Break' : `Block #${workBlockNumber}`}
+                          </span>
+                          <span className="placeholder-text">Editing...</span>
+                        </div>
+                      </div>
+                    );
+                  }
+
                   return (
                   <div
                     key={block.id}
-                    className={`completed-block ${block.isBreak ? 'break-block' : ''}`}
+                    className={`completed-block ${block.isBreak ? 'break-block' : ''} ${isBeforeGap ? 'gap-shrink' : ''} ${isAfterGap ? 'gap-expand' : ''}`}
                   >
-                    <div className="completed-block-header">
+                    <div className="completed-block-row">
                       <span className="completed-number">
-                        {block.isBreak ? 'Break' : `Block #${workBlockNumber}`}
+                        {block.isBreak ? 'Break' : `#${workBlockNumber}`}
+                      </span>
+                      <span className="completed-time">
+                        {formatTime(block.startTime)} - {formatTime(block.endTime)}
                       </span>
                       <span className="completed-hours">
-                        {calculateBlockHours(block.startTime, block.endTime)} hrs
+                        {calculateBlockHours(block.startTime, block.endTime)}hr
                       </span>
-                    </div>
-                    <div className="completed-task">
-                      {block.tasks.split(' • ').map((task, i) => (
-                        <div key={i} className="task-line">{task}</div>
-                      ))}
-                    </div>
-                    <div className="completed-meta">
-                      <span>{formatTime(block.startTime)} - {formatTime(block.endTime)}</span>
                       <div className="completed-actions">
                         <button
                           type="button"
-                          className={`btn-edit ${block.isBreak ? 'btn-extend-break' : ''}`}
+                          className={`btn-icon btn-edit-icon ${block.isBreak ? 'btn-extend-break' : ''}`}
                           onClick={() => handleEditBlock(block)}
                           disabled={editingBlock !== null}
+                          title={block.isBreak ? 'Extend Break' : 'Edit'}
                         >
-                          {block.isBreak ? 'Extend Break' : 'Edit'}
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+                          </svg>
                         </button>
                         <button
                           type="button"
-                          className="btn-delete"
+                          className="btn-icon btn-delete-icon"
                           onClick={() => removeCompletedBlock(block.id)}
+                          title="Delete"
                         >
-                          ×
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6"/>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                          </svg>
                         </button>
                       </div>
+                    </div>
+                    <div className={`completed-task ${block.tasks.split(' • ').length > 1 ? 'multi-task' : ''}`}>
+                      {block.tasks.split(' • ').map((task, i) => (
+                        <div key={i} className="task-line">{task}</div>
+                      ))}
                     </div>
                   </div>
                   );
@@ -3568,7 +4363,7 @@ function TimeClock() {
                         <div className="user-stats">
                           <div className="user-stat">
                             <span className="stat-number">
-                              {userPayWeeksData.payWeeks.reduce((sum, w) => sum + w.approvedHours, 0).toFixed(1)}
+                              {formatHours(userPayWeeksData.payWeeks.reduce((sum, w) => sum + w.approvedHours, 0))}
                             </span>
                             <span className="stat-label">Total Hours</span>
                           </div>
@@ -3643,15 +4438,15 @@ function TimeClock() {
                 <>
                   <div className="stats-grid">
                     <div className="stat-card">
-                      <div className="stat-value">{dashboardData.hoursToday?.toFixed(1) || 0}</div>
+                      <div className="stat-value">{formatHours(dashboardData.hoursToday || 0)}</div>
                       <div className="stat-label">Hours Today</div>
                     </div>
                     <div className="stat-card">
-                      <div className="stat-value">{dashboardData.hoursThisWeek?.toFixed(1) || 0}</div>
+                      <div className="stat-value">{formatHours(dashboardData.hoursThisWeek || 0)}</div>
                       <div className="stat-label">Hours This Week</div>
                     </div>
                     <div className="stat-card">
-                      <div className="stat-value">{dashboardData.hoursThisMonth?.toFixed(1) || 0}</div>
+                      <div className="stat-value">{formatHours(dashboardData.hoursThisMonth || 0)}</div>
                       <div className="stat-label">Hours This Month</div>
                     </div>
                   </div>
@@ -3674,7 +4469,7 @@ function TimeClock() {
                           <div key={emp.id} className="top-employee" onClick={() => loadUserPayWeeks(emp.id)} style={{ cursor: 'pointer' }}>
                             <span className="rank">#{i + 1}</span>
                             <span className="name">{emp.name}</span>
-                            <span className="hours">{emp.hours?.toFixed(1) || 0} hrs</span>
+                            <span className="hours">{formatHours(emp.hours || 0)} hrs</span>
                           </div>
                         ))}
                       </div>
@@ -4176,9 +4971,9 @@ function TimeClock() {
                 )}
               </div>
 
-              {pendingShiftsLoading ? (
+              {pendingShiftsLoading && pendingShifts.length === 0 ? (
                 <p className="loading-text">Loading pending shifts...</p>
-              ) : pendingShifts.length === 0 ? (
+              ) : pendingShifts.length === 0 && !pendingShiftsLoading ? (
                 <div className="empty-state">
                   <p>No shifts pending approval</p>
                 </div>
@@ -4311,33 +5106,62 @@ function TimeClock() {
           {adminSubTab === 'weekly' && (
             <div className="admin-content">
                   <div className="weekly-view-container">
+                    {/* Weeks Sidebar Backdrop */}
+                    <div
+                      className={`weeks-sidebar-backdrop ${showWeeksSidebar ? 'open' : ''}`}
+                      onClick={() => setShowWeeksSidebar(false)}
+                    />
                     {/* Weeks Sidebar */}
-                    {showWeeksSidebar && (
-                      <div className="weeks-sidebar">
+                      <div className={`weeks-sidebar ${showWeeksSidebar ? 'open' : ''}`}>
                         <div className="weeks-sidebar-header">
                           <h4>Select Week</h4>
                           <button className="btn-close-sidebar" onClick={() => setShowWeeksSidebar(false)}>&times;</button>
                         </div>
                         <div className="weeks-list">
-                          {availableWeeks.map((week, idx) => (
-                            <button
-                              key={idx}
-                              className={`week-option ${week.weekStart === currentWeekStart ? 'active' : ''}`}
-                              onClick={() => {
-                                loadWeeklyView(week.weekStart);
-                                setShowWeeksSidebar(false);
-                              }}
-                            >
-                              <span className="week-dates">{week.display}</span>
-                              <span className="week-shift-count">{week.shiftCount} shifts</span>
-                            </button>
-                          ))}
+                          {/* Always show current week option */}
+                          {(() => {
+                            const thisWeek = getWeekBounds();
+                            const isCurrentWeekInList = availableWeeks.some(w => w.weekStart === thisWeek.weekStart);
+                            if (!isCurrentWeekInList) {
+                              return (
+                                <button
+                                  className={`week-option current-week ${thisWeek.weekStart === currentWeekStart ? 'active' : ''}`}
+                                  onClick={() => {
+                                    loadWeeklyView(thisWeek.weekStart);
+                                    setShowWeeksSidebar(false);
+                                  }}
+                                >
+                                  <span className="week-dates">{thisWeek.display}</span>
+                                  <span className="week-shift-count">Current Week</span>
+                                </button>
+                              );
+                            }
+                            return null;
+                          })()}
+                          {availableWeeks.map((week, idx) => {
+                            const thisWeek = getWeekBounds();
+                            const isCurrentWeek = week.weekStart === thisWeek.weekStart;
+                            return (
+                              <button
+                                key={idx}
+                                className={`week-option ${week.weekStart === currentWeekStart ? 'active' : ''} ${isCurrentWeek ? 'current-week' : ''}`}
+                                onClick={() => {
+                                  loadWeeklyView(week.weekStart);
+                                  setShowWeeksSidebar(false);
+                                }}
+                              >
+                                <span className="week-dates">{week.display}</span>
+                                <span className="week-shift-count">
+                                  {isCurrentWeek ? `${week.shiftCount} shifts (Current)` : `${week.shiftCount} shifts`}
+                                </span>
+                              </button>
+                            );
+                          })}
                           {availableWeeks.length === 0 && (
-                            <p className="no-weeks-msg">No weeks with shifts found</p>
+                            <p className="no-weeks-msg">Select current week above</p>
                           )}
                         </div>
                       </div>
-                    )}
 
                     <div className="weekly-main-content">
                       <div className="weekly-header">
@@ -4354,34 +5178,64 @@ function TimeClock() {
                           setShowWeeksSidebar(!showWeeksSidebar);
                         }}>📅 Weeks</button>
                         <div className="week-nav-controls">
-                          {/* Previous (older) week arrow - weeks are sorted DESC so older = higher index */}
-                          {availableWeeks.length > 0 && (() => {
-                            const currentIdx = availableWeeks.findIndex(w => w.weekStart === currentWeekStart);
-                            return currentIdx >= 0 && currentIdx < availableWeeks.length - 1 ? (
-                              <button
-                                className="btn-week-arrow"
-                                onClick={() => loadWeeklyView(availableWeeks[currentIdx + 1].weekStart)}
-                                title="Previous week"
-                              >
-                                ◀
-                              </button>
-                            ) : null;
-                          })()}
+                          {/* Previous (older) week arrow */}
+                          <button
+                            className="btn-week-arrow"
+                            onClick={() => {
+                              if (!currentWeekStart) return;
+                              setWeekSlideDirection('right'); // Content slides right (going back)
+                              // Use noon to avoid timezone issues
+                              const current = new Date(currentWeekStart + 'T12:00:00');
+                              current.setDate(current.getDate() - 7);
+                              const prevWeek = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
+                              loadWeeklyView(prevWeek);
+                              // Reset animation after it completes
+                              setTimeout(() => setWeekSlideDirection(null), 300);
+                            }}
+                            title="Previous week"
+                          >
+                            ◀
+                          </button>
                           <h3>{weeklyViewData?.weekDisplay || 'Loading...'}</h3>
-                          {/* Next (newer) week arrow */}
-                          {availableWeeks.length > 0 && (() => {
-                            const currentIdx = availableWeeks.findIndex(w => w.weekStart === currentWeekStart);
-                            return currentIdx > 0 ? (
+                          {/* Next (newer) week arrow - don't go past current week */}
+                          {(() => {
+                            // Calculate current week's Sunday using local time
+                            const today = new Date();
+                            const dayOfWeek = today.getDay();
+                            const thisWeekSunday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - dayOfWeek, 12, 0, 0);
+                            const thisWeekStart = `${thisWeekSunday.getFullYear()}-${String(thisWeekSunday.getMonth() + 1).padStart(2, '0')}-${String(thisWeekSunday.getDate()).padStart(2, '0')}`;
+                            const canGoNext = currentWeekStart && currentWeekStart < thisWeekStart;
+
+                            return (
                               <button
-                                className="btn-week-arrow"
-                                onClick={() => loadWeeklyView(availableWeeks[currentIdx - 1].weekStart)}
+                                className={`btn-week-arrow ${!canGoNext ? 'disabled' : ''}`}
+                                onClick={() => {
+                                  if (!canGoNext || !currentWeekStart) return;
+                                  setWeekSlideDirection('left'); // Content slides left (going forward)
+                                  // Use noon to avoid timezone issues
+                                  const current = new Date(currentWeekStart + 'T12:00:00');
+                                  current.setDate(current.getDate() + 7);
+                                  const nextWeek = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
+                                  // Don't go past current week
+                                  loadWeeklyView(nextWeek <= thisWeekStart ? nextWeek : thisWeekStart);
+                                  // Reset animation after it completes
+                                  setTimeout(() => setWeekSlideDirection(null), 300);
+                                }}
+                                disabled={!canGoNext}
                                 title="Next week"
                               >
                                 ▶
                               </button>
-                            ) : null;
+                            );
                           })()}
                         </div>
+                        <button
+                          className="btn-refresh-week"
+                          onClick={() => loadWeeklyView(currentWeekStart, true)}
+                          title="Refresh data"
+                        >
+                          ↻
+                        </button>
                       </div>
 
                   {/* Mobile View Mode Toggle */}
@@ -4403,7 +5257,7 @@ function TimeClock() {
                   {weeklyViewLoading ? (
                     <p className="loading-text">Loading weekly view...</p>
                   ) : weeklyViewData ? (
-                    <div className="weekly-combined-view">
+                    <div className={`weekly-combined-view ${weekSlideDirection ? `slide-${weekSlideDirection}` : ''}`}>
                       {/* Thin Employee List Sidebar */}
                       <div className={`weekly-sidebar ${weeklyViewMode === 'calendar' ? 'mobile-hidden' : ''}`}>
                         <div className="sidebar-header">Employee</div>
@@ -4448,11 +5302,12 @@ function TimeClock() {
                           })}
                         </div>
 
-                        {/* Employee Rows */}
-                        {weeklyViewData.employees.filter(emp => emp.shifts.length > 0).map(emp => {
+                        {/* Employee Rows - Show ALL employees for consistent gridlines */}
+                        {weeklyViewData.employees.map(emp => {
                           const empColor = `hsl(${(emp.userId * 137) % 360}, 70%, 50%)`;
+                          const hasShifts = emp.shifts.length > 0;
                           return (
-                            <div key={emp.userId} className="calendar-employee-row">
+                            <div key={emp.userId} className={`calendar-employee-row ${!hasShifts ? 'no-shifts-row' : ''}`}>
                               {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, dayIdx) => {
                                 const weekStartDate = new Date(weeklyViewData.weekStart + 'T00:00:00');
                                 weekStartDate.setDate(weekStartDate.getDate() + dayIdx);
