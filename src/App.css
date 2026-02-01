@@ -1,6 +1,11 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
+html, body {
+  overflow-x: hidden;
+}
+
 .app {
+  overflow-x: hidden;
   max-width: 80vw;
   margin: 0 auto;
   padding: 20px 24px;
@@ -346,7 +351,19 @@
 }
 
 .time-block.swiping-out {
-  animation: swipeOut 0.25s cubic-bezier(0.4, 0, 0.6, 1) forwards;
+  animation: swipeRight 0.25s cubic-bezier(0.4, 0, 0.6, 1) forwards;
+}
+
+/* Swipe right animation - for blocks going TO completed section */
+@keyframes swipeRight {
+  0% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(30%);
+    opacity: 0;
+  }
 }
 
 .block-header {
@@ -1020,6 +1037,38 @@
 .completed-block.break-block {
   border-left-color: #f39c12;
   background: #fef9e7;
+}
+
+/* Slide-out animation when editing a block */
+.completed-block.sliding-out {
+  animation: swipeOut 0.25s ease-in forwards;
+}
+
+@keyframes swipeOut {
+  0% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(-30%);
+    opacity: 0;
+  }
+}
+
+/* Delete animation */
+.completed-block.deleting {
+  animation: deleteSlide 0.25s ease-in forwards;
+}
+
+@keyframes deleteSlide {
+  0% {
+    transform: translateX(0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(30%) scale(0.95);
+    opacity: 0;
+  }
 }
 
 /* Placeholder for block being edited */

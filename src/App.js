@@ -177,6 +177,9 @@ function TimeClock() {
   const [gapTasks, setGapTasks] = useState(['']);
   const [blocksBeforeEdit, setBlocksBeforeEdit] = useState(null); // For restoring on gap cancel
   const [gapAnimatingIndex, setGapAnimatingIndex] = useState(null); // Index where gap animation is happening
+  const [slidingOutBlockId, setSlidingOutBlockId] = useState(null); // Block animating out for editing
+  const [deletingBlockId, setDeletingBlockId] = useState(null); // Block animating out for deletion
+  const [deleteGapSource, setDeleteGapSource] = useState(null); // 'delete' to track gap from deletion vs edit
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const dropdownRef = useRef(null);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -1231,6 +1234,9 @@ function TimeClock() {
   const handleBreak = () => {
     if (!currentBlock) return;
 
+    // Clear any existing toast
+    setToast(null);
+
     // Break starts where current block ends (or use current block's end time if set)
     let breakStartTime;
     if (currentBlock.endTime) {
@@ -1260,29 +1266,36 @@ function TimeClock() {
       isBreak: true
     };
 
-    // Trigger swipe animation
-    setSwipingBlockId(breakBlock.id);
+    // First, show the break block in current block area, then animate it
+    setCurrentBlock(breakBlock);
+    setCurrentTasks(['15 min Break']);
 
-    // Optimistic update - move to completed as swipe-out finishes
-    setTimeout(() => {
-      // Add work block if exists, then break block
-      if (workBlock) {
-        setCompletedBlocks(prev => [...prev, workBlock, breakBlock]);
-      } else {
-        setCompletedBlocks(prev => [...prev, breakBlock]);
-      }
+    // Small delay to ensure the break block renders before animation starts
+    requestAnimationFrame(() => {
+      // Trigger swipe animation on the break block
+      setSwipingBlockId(breakBlock.id);
 
-      // Create new current block starting after break
-      const newBlock = {
-        id: Date.now() + 1,
-        startTime: breakEndTime,
-        endTime: '',
-        tasks: ''
-      };
-      setCurrentBlock(newBlock);
-      setCurrentTasks(['']);
-      setSwipingBlockId(null);
-    }, 150);
+      // Optimistic update - move to completed as swipe-out finishes
+      setTimeout(() => {
+        // Add work block if exists, then break block
+        if (workBlock) {
+          setCompletedBlocks(prev => [...prev, workBlock, breakBlock]);
+        } else {
+          setCompletedBlocks(prev => [...prev, breakBlock]);
+        }
+
+        // Create new current block starting after break
+        const newBlock = {
+          id: Date.now() + 1,
+          startTime: breakEndTime,
+          endTime: '',
+          tasks: ''
+        };
+        setCurrentBlock(newBlock);
+        setCurrentTasks(['']);
+        setSwipingBlockId(null);
+      }, 150);
+    });
 
     // Save to server in background (non-blocking)
     (async () => {
@@ -1383,15 +1396,22 @@ function TimeClock() {
     // Store original block state for cancel (deep copy)
     setEditingBlockOriginal({ ...block });
 
-    // Save current block state and edit the selected block
-    setEditingBlock(block);
-    // Split existing tasks string into array for editing (skip for breaks)
-    const tasksArray = block.isBreak ? [''] : (block.tasks ? block.tasks.split(' • ') : ['']);
-    setEditingTasks(tasksArray.length > 0 ? tasksArray : ['']);
-    // Replace with placeholder instead of removing (keeps position and numbering stable)
-    setCompletedBlocks(completedBlocks.map(b =>
-      b.id === block.id ? { ...b, isEditingPlaceholder: true } : b
-    ));
+    // Start slide-out animation
+    setSlidingOutBlockId(block.id);
+
+    // After animation completes, set up editing state
+    setTimeout(() => {
+      setSlidingOutBlockId(null);
+      // Save current block state and edit the selected block
+      setEditingBlock(block);
+      // Split existing tasks string into array for editing (skip for breaks)
+      const tasksArray = block.isBreak ? [''] : (block.tasks ? block.tasks.split(' • ') : ['']);
+      setEditingTasks(tasksArray.length > 0 ? tasksArray : ['']);
+      // Replace with placeholder instead of removing (keeps position and numbering stable)
+      setCompletedBlocks(prev => prev.map(b =>
+        b.id === block.id ? { ...b, isEditingPlaceholder: true } : b
+      ));
+    }, 250); // Match animation duration
   };
 
   // Helper to compare times accounting for overnight shifts
@@ -1559,10 +1579,11 @@ function TimeClock() {
     setGapTasks(['']);
     setBlocksBeforeEdit(null);
     setGapAnimatingIndex(null);
+    setDeleteGapSource(null);
   };
 
   const handleCancelGap = () => {
-    // Cancel gap fill - restore blocks to state before the edit
+    // Cancel gap fill - restore blocks to state before the edit/delete
     if (blocksBeforeEdit) {
       setCompletedBlocks(blocksBeforeEdit);
     }
@@ -1571,6 +1592,7 @@ function TimeClock() {
     setGapTasks(['']);
     setBlocksBeforeEdit(null);
     setGapAnimatingIndex(null);
+    setDeleteGapSource(null);
   };
 
   const handleCancelEdit = () => {
@@ -1587,7 +1609,64 @@ function TimeClock() {
   };
 
   const removeCompletedBlock = (id) => {
-    setCompletedBlocks(completedBlocks.filter(b => b.id !== id));
+    const blockIndex = completedBlocks.findIndex(b => b.id === id);
+    if (blockIndex === -1) return;
+
+    const prevBlock = blockIndex > 0 ? completedBlocks[blockIndex - 1] : null;
+    const nextBlock = blockIndex < completedBlocks.length - 1 ? completedBlocks[blockIndex + 1] : null;
+
+    // Check if deletion creates a gap
+    let createsGap = false;
+    let gapStart = null;
+    let gapEnd = null;
+    let gapIndex = blockIndex;
+
+    if (prevBlock && nextBlock) {
+      // Block is in the middle - check if prev.endTime !== next.startTime
+      const prevEndMinutes = timeToMinutes(prevBlock.endTime);
+      const nextStartMinutes = timeToMinutes(nextBlock.startTime);
+      if (prevEndMinutes < nextStartMinutes) {
+        createsGap = true;
+        gapStart = prevBlock.endTime;
+        gapEnd = nextBlock.startTime;
+      }
+    }
+
+    // Start delete animation
+    setDeletingBlockId(id);
+
+    // After animation, handle the deletion
+    setTimeout(() => {
+      setDeletingBlockId(null);
+      const blocksAfterDelete = completedBlocks.filter(b => b.id !== id);
+
+      if (createsGap) {
+        // Store blocks before deletion for cancel restore
+        setBlocksBeforeEdit([...completedBlocks]);
+        setDeleteGapSource('delete');
+
+        // Animate the gap opening
+        setGapAnimatingIndex(gapIndex);
+
+        // Set up gap data and show modal after gap animation
+        setTimeout(() => {
+          setGapData({
+            startTime: gapStart,
+            endTime: gapEnd,
+            pendingBlocks: blocksAfterDelete,
+            gapIndex: gapIndex
+          });
+          setGapTasks(['']);
+          setShowGapModal(true);
+        }, 400); // Match gap animation duration
+
+        // Update blocks (gap will be visible)
+        setCompletedBlocks(blocksAfterDelete);
+      } else {
+        // No gap - just remove the block
+        setCompletedBlocks(blocksAfterDelete);
+      }
+    }, 250); // Match slide-out animation duration
   };
 
   const handleChangePassword = async () => {
@@ -2181,7 +2260,9 @@ function TimeClock() {
             </div>
             <div className="modal-body">
               <div className="gap-warning">
-                Your edit created a gap in the timeline. Please fill in what you worked on during this time.
+                {deleteGapSource === 'delete'
+                  ? 'Deleting this block created a gap in the timeline. Please fill in what you worked on during this time.'
+                  : 'Your edit created a gap in the timeline. Please fill in what you worked on during this time.'}
               </div>
               <div className="gap-times">
                 <div className="time-field">
@@ -2244,7 +2325,7 @@ function TimeClock() {
             </div>
             <div className="modal-footer">
               <button className="btn-cancel-modal" onClick={handleCancelGap}>
-                Cancel Edit
+                {deleteGapSource === 'delete' ? 'Undo Delete' : 'Cancel Edit'}
               </button>
               <button
                 className="btn-confirm-modal"
@@ -3547,6 +3628,10 @@ function TimeClock() {
                   const isBeforeGap = gapAnimatingIndex !== null && index === gapAnimatingIndex - 1;
                   const isAfterGap = gapAnimatingIndex !== null && index === gapAnimatingIndex;
 
+                  // Slide-out animation classes
+                  const isSlidingOut = slidingOutBlockId === block.id;
+                  const isDeleting = deletingBlockId === block.id;
+
                   // Show placeholder for blocks being edited
                   if (block.isEditingPlaceholder) {
                     return (
@@ -3564,7 +3649,7 @@ function TimeClock() {
                   return (
                   <div
                     key={block.id}
-                    className={`completed-block ${block.isBreak ? 'break-block' : ''} ${isBeforeGap ? 'gap-shrink' : ''} ${isAfterGap ? 'gap-expand' : ''}`}
+                    className={`completed-block ${block.isBreak ? 'break-block' : ''} ${isBeforeGap ? 'gap-shrink' : ''} ${isAfterGap ? 'gap-expand' : ''} ${isSlidingOut ? 'sliding-out' : ''} ${isDeleting ? 'deleting' : ''}`}
                   >
                     <div className="completed-block-row">
                       <span className="completed-number">
@@ -3581,7 +3666,7 @@ function TimeClock() {
                           type="button"
                           className={`btn-icon btn-edit-icon ${block.isBreak ? 'btn-extend-break' : ''}`}
                           onClick={() => handleEditBlock(block)}
-                          disabled={editingBlock !== null}
+                          disabled={editingBlock !== null || slidingOutBlockId !== null || deletingBlockId !== null}
                           title={block.isBreak ? 'Extend Break' : 'Edit'}
                         >
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -3592,6 +3677,7 @@ function TimeClock() {
                           type="button"
                           className="btn-icon btn-delete-icon"
                           onClick={() => removeCompletedBlock(block.id)}
+                          disabled={slidingOutBlockId !== null || deletingBlockId !== null}
                           title="Delete"
                         >
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
