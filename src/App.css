@@ -2867,6 +2867,95 @@ html, body {
   flex-direction: column;
 }
 
+/* Admin Right Sidebar - Recently Approved (mirrors left sidebar) */
+.admin-right-sidebar {
+  width: 200px;
+  flex-shrink: 0;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  padding: 16px 12px;
+  align-self: stretch;
+}
+
+.admin-right-sidebar h4 {
+  margin: 0 0 16px 0;
+  color: #64748b;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.admin-right-sidebar .no-approved {
+  color: #94a3b8;
+  font-style: italic;
+  font-size: 0.9rem;
+}
+
+.admin-right-sidebar .approved-sidebar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.admin-right-sidebar .approved-sidebar-item {
+  padding: 0;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  overflow: hidden;
+}
+
+.admin-right-sidebar .approved-sidebar-item:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.admin-right-sidebar .approved-item-header {
+  padding: 10px 12px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.admin-right-sidebar .approved-item-details {
+  padding: 10px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.admin-right-sidebar .approved-item-name {
+  font-weight: 600;
+  color: #1e293b;
+  font-size: 0.85rem;
+}
+
+.admin-right-sidebar .approved-item-hours {
+  color: #22c55e;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.admin-right-sidebar .approved-item-date {
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+.admin-right-sidebar .approved-item-times {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  color: #475569;
+  font-size: 0.8rem;
+}
+
 /* Mobile responsive sidebar */
 @media (max-width: 768px) {
   .admin-layout {
@@ -2898,6 +2987,10 @@ html, body {
 
   .admin-nav-item .nav-icon {
     font-size: 1.3rem;
+  }
+
+  .admin-right-sidebar {
+    display: none;
   }
 }
 
@@ -5067,51 +5160,94 @@ html, body {
 }
 
 .pending-shifts-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
   min-height: 100px;
+  align-items: start;
 }
 
 .pending-shift-card {
   background: white;
   border: 1px solid #e2e8f0;
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.2s, transform 0.2s;
+  cursor: pointer;
+}
+
+.pending-shift-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
 }
 
 .pending-shift-header {
   display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.pending-shift-top-row {
+  display: flex;
   align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
-.pending-shift-info {
-  flex: 1;
-  min-width: 150px;
+.pending-shift-top-row .checkbox-label {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  height: 20px;
 }
 
-.pending-shift-info strong {
-  display: block;
+.pending-shift-name {
+  font-weight: 600;
   color: #1e293b;
+  font-size: 1rem;
 }
 
-.pending-shift-info .shift-date {
-  color: #64748b;
+.pending-shift-date {
+  color: #94a3b8;
   font-size: 0.85rem;
+  margin-left: auto;
 }
 
 .pending-shift-times {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
+  text-align: center;
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.pending-shift-times span:first-child {
+  display: block;
+  color: #475569;
+  font-size: 0.95rem;
+  font-weight: 500;
+  white-space: nowrap;
+  margin-bottom: 4px;
 }
 
 .pending-shift-times .hours {
-  font-weight: 600;
-  color: #22c55e;
+  display: block;
+  font-weight: 700;
+  color: #f59e0b;
+  font-size: 1.25rem;
+}
+
+.pending-shift-bottom-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid #f1f5f9;
 }
 
 .pending-shift-actions {
@@ -5119,42 +5255,74 @@ html, body {
   gap: 8px;
 }
 
+/* Responsive: 2 columns on medium, 1 on small */
+@media (max-width: 1200px) {
+  .pending-shifts-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 800px) {
+  .pending-shifts-list {
+    grid-template-columns: 1fr;
+  }
+}
+
 .btn-approve {
-  background: #22c55e;
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
   color: white;
   border: none;
-  padding: 6px 12px;
-  border-radius: 4px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
   cursor: pointer;
-  font-weight: 500;
+  font-weight: 600;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(34, 197, 94, 0.4);
+  transition: all 0.15s;
 }
 
 .btn-approve:hover {
-  background: #16a34a;
+  background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.5);
 }
 
 .btn-reject {
-  background: #ef4444;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
   color: white;
   border: none;
-  padding: 6px 12px;
-  border-radius: 4px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
   cursor: pointer;
-  font-weight: 500;
+  font-weight: 600;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.4);
+  transition: all 0.15s;
 }
 
 .btn-reject:hover {
-  background: #dc2626;
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.5);
 }
 
 .btn-expand-blocks {
   background: #f1f5f9;
-  border: none;
-  padding: 4px 8px;
-  border-radius: 4px;
+  border: 1px solid #e2e8f0;
+  padding: 6px 10px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 0.75rem;
   color: #64748b;
+  transition: all 0.15s;
   white-space: nowrap;
 }
 
@@ -5173,8 +5341,11 @@ html, body {
 
 .pending-shift-blocks {
   margin-top: 12px;
-  padding-top: 12px;
+  padding: 12px;
   border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+  border-radius: 0 0 12px 12px;
+  margin: 0 -16px -16px -16px;
 }
 
 .pending-shift-blocks small {
@@ -5187,8 +5358,23 @@ html, body {
   display: flex;
   gap: 12px;
   font-size: 0.85rem;
-  padding: 4px 0;
+  padding: 8px 12px;
   color: #475569;
+  background: white;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  align-items: flex-start;
+}
+
+.mini-block:last-child {
+  margin-bottom: 0;
+}
+
+.mini-block .block-time {
+  white-space: nowrap;
+  color: #1e293b;
+  font-weight: 500;
+  flex-shrink: 0;
 }
 
 .mini-block.break {
@@ -5202,79 +5388,11 @@ html, body {
 
 /* Pending Approval Layout */
 .pending-approval-layout {
-  display: flex;
-  flex-direction: column;
-  max-width: 800px;
+  width: 100%;
 }
 
 .pending-section {
-  flex: 1;
-  min-height: 200px;
-  overflow-y: auto;
-}
-
-/* Approved Shifts Section */
-.approved-shifts-section {
-  margin-top: auto;
-  padding-top: 24px;
-  border-top: 1px solid #e2e8f0;
-  flex-shrink: 0;
-}
-
-.approved-shifts-section h3 {
-  margin: 0 0 16px 0;
-  color: #1e293b;
-  font-size: 1.1rem;
-}
-
-.no-approved {
-  color: #64748b;
-  font-style: italic;
-}
-
-.approved-shifts-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.approved-shift-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 16px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  transition: background 0.15s, border-color 0.15s;
-}
-
-.approved-shift-row:hover {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
-}
-
-.approved-shift-info {
-  flex: 1;
-  min-width: 150px;
-}
-
-.approved-shift-info strong {
-  display: block;
-  color: #1e293b;
-}
-
-.approved-shift-info .shift-date {
-  color: #64748b;
-  font-size: 0.85rem;
-}
-
-.approved-shift-times {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  color: #475569;
+  width: 100%;
 }
 
 .approved-shift-times .hours {
@@ -5737,19 +5855,21 @@ html, body {
   color: #64748b;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 2px solid #cbd5e1;
   height: 52px;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
 }
 
 .sidebar-employee {
   padding: 10px 12px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid #cbd5e1;
   cursor: pointer;
   transition: background 0.2s;
   border-left: 4px solid transparent;
   height: 64px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -5757,6 +5877,10 @@ html, body {
 
 .sidebar-employee:hover {
   background: #e2e8f0;
+}
+
+.sidebar-employee:last-child {
+  border-bottom: none;
 }
 
 .sidebar-employee .emp-name {
@@ -5804,13 +5928,14 @@ html, body {
   border-bottom: 2px solid #cbd5e1;
   background: #f8fafc;
   min-width: 700px;
+  height: 52px;
+  box-sizing: border-box;
 }
 
 .calendar-day-col-header {
   padding: 8px 4px;
   text-align: center;
   border-right: 1px solid #cbd5e1;
-  height: 52px;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -5836,6 +5961,8 @@ html, body {
   grid-template-columns: repeat(7, 1fr);
   border-bottom: 1px solid #cbd5e1;
   min-width: 700px;
+  height: 64px;
+  box-sizing: border-box;
 }
 
 .calendar-employee-row:last-child {
@@ -5853,7 +5980,6 @@ html, body {
 .calendar-day-cell {
   padding: 4px;
   border-right: 1px solid #cbd5e1;
-  height: 64px;
   display: flex;
   align-items: center;
   justify-content: center;

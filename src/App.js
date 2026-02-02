@@ -6119,57 +6119,59 @@ function TimeClock() {
               ) : (
                 <div className="pending-shifts-list">
                   {pendingShifts.map(shift => (
-                    <div key={shift.id} className="pending-shift-card">
+                    <div key={shift.id} className="pending-shift-card" onClick={() => viewShiftDetails(shift.id)}>
                       <div className="pending-shift-header">
-                        <label className="checkbox-label" onClick={e => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            checked={selectedPendingShifts.has(shift.id)}
-                            onChange={(e) => {
-                              const newSet = new Set(selectedPendingShifts);
-                              if (e.target.checked) {
-                                newSet.add(shift.id);
-                              } else {
-                                newSet.delete(shift.id);
-                              }
-                              setSelectedPendingShifts(newSet);
-                            }}
-                          />
-                        </label>
-                        <div className="pending-shift-info clickable" onClick={() => viewShiftDetails(shift.id)}>
-                          <strong>{shift.user_name}</strong>
-                          <span className="shift-date">{new Date(shift.date + 'T00:00:00').toLocaleDateString()}</span>
+                        <div className="pending-shift-top-row">
+                          <label className="checkbox-label" onClick={e => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={selectedPendingShifts.has(shift.id)}
+                              onChange={(e) => {
+                                const newSet = new Set(selectedPendingShifts);
+                                if (e.target.checked) {
+                                  newSet.add(shift.id);
+                                } else {
+                                  newSet.delete(shift.id);
+                                }
+                                setSelectedPendingShifts(newSet);
+                              }}
+                            />
+                          </label>
+                          <span className="pending-shift-name">{shift.user_name}</span>
+                          <span className="pending-shift-date">{new Date(shift.date + 'T00:00:00').toLocaleDateString()}</span>
                         </div>
                         <div className="pending-shift-times">
                           <span>{formatTime(shift.clockInTime || shift.clock_in_time)} - {formatTime(shift.clockOutTime || shift.clock_out_time)}</span>
                           <span className="hours">{shift.totalHours || shift.total_hours} hrs</span>
                         </div>
-                        {shift.timeBlocks && shift.timeBlocks.length > 0 && (
-                          <button
-                            className="btn-expand-blocks"
-                            onClick={() => {
-                              const newSet = new Set(expandedPendingShifts);
-                              if (newSet.has(shift.id)) {
-                                newSet.delete(shift.id);
-                              } else {
-                                newSet.add(shift.id);
-                              }
-                              setExpandedPendingShifts(newSet);
-                            }}
-                          >
-                            {expandedPendingShifts.has(shift.id) ? '▼' : '▶'} {shift.timeBlocks.length} blocks
-                          </button>
-                        )}
-                        <div className="pending-shift-actions">
-                          <button className="btn-approve" onClick={() => handleApproveShift(shift.id)}>✓</button>
-                          <button className="btn-reject" onClick={() => { setRejectModalShift(shift); setRejectReason(''); }}>✕</button>
+                        <div className="pending-shift-bottom-row" onClick={e => e.stopPropagation()}>
+                          {shift.timeBlocks && shift.timeBlocks.length > 0 ? (
+                            <button
+                              className="btn-expand-blocks"
+                              onClick={() => {
+                                const newSet = new Set(expandedPendingShifts);
+                                if (newSet.has(shift.id)) {
+                                  newSet.delete(shift.id);
+                                } else {
+                                  newSet.add(shift.id);
+                                }
+                                setExpandedPendingShifts(newSet);
+                              }}
+                            >
+                              {expandedPendingShifts.has(shift.id) ? '▼' : '▶'} {shift.timeBlocks.length} blocks
+                            </button>
+                          ) : <span></span>}
+                          <div className="pending-shift-actions">
+                            <button className="btn-approve" onClick={() => handleApproveShift(shift.id)}>✓</button>
+                            <button className="btn-reject" onClick={() => { setRejectModalShift(shift); setRejectReason(''); }}>✕</button>
+                          </div>
                         </div>
                       </div>
                       {expandedPendingShifts.has(shift.id) && shift.timeBlocks && shift.timeBlocks.length > 0 && (
                         <div className="pending-shift-blocks">
                           {shift.timeBlocks.map((block, idx) => (
                             <div key={idx} className={`mini-block ${block.isBreak || block.is_break ? 'break' : ''}`}>
-                              <span>{formatTime(block.startTime || block.start_time)} - {formatTime(block.endTime || block.end_time)}</span>
+                              <span className="block-time">{formatTime(block.startTime || block.start_time)} - {formatTime(block.endTime || block.end_time)}</span>
                               {block.isBreak || block.is_break ? <em>Break</em> : <span className="block-tasks">{block.tasks}</span>}
                             </div>
                           ))}
@@ -6179,35 +6181,6 @@ function TimeClock() {
                   ))}
                 </div>
               )}
-              </div>
-
-              {/* Approved Shifts Section */}
-              <div className="approved-shifts-section">
-                <h3>Recently Approved</h3>
-                {approvedShifts.length === 0 ? (
-                  <p className="no-approved">No recently approved shifts</p>
-                ) : (
-                  <div className="approved-shifts-list">
-                    {approvedShifts.map(shift => (
-                      <div
-                        key={shift.id}
-                        className="approved-shift-row"
-                        onClick={() => viewShiftDetails(shift.id)}
-                        style={{ cursor: 'pointer' }}
-                      >
-                        <div className="approved-shift-info">
-                          <strong>{shift.user_name}</strong>
-                          <span className="shift-date">{new Date(shift.date + 'T00:00:00').toLocaleDateString()}</span>
-                        </div>
-                        <div className="approved-shift-times">
-                          <span>{formatTime(shift.clockInTime || shift.clock_in_time)} - {formatTime(shift.clockOutTime || shift.clock_out_time)}</span>
-                          <span className="hours">{shift.totalHours || shift.total_hours} hrs</span>
-                        </div>
-                        <span className="status-badge approved">Approved</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
           )}
@@ -6400,29 +6373,20 @@ function TimeClock() {
                       {/* Thin Employee List Sidebar */}
                       <div className={`weekly-sidebar ${weeklyViewMode === 'calendar' ? 'mobile-hidden' : ''}`}>
                         <div className="sidebar-header">Employee</div>
-                        {weeklyViewData.employees.filter(emp => emp.shifts.length > 0).map(emp => (
-                          <div
-                            key={emp.userId}
-                            className="sidebar-employee"
-                            onClick={() => loadUserPayWeeks(emp.userId)}
-                            style={{ borderLeftColor: `hsl(${(emp.userId * 137) % 360}, 70%, 50%)` }}
-                          >
-                            <span className="emp-name">{emp.userName}</span>
-                            <span className="emp-hours">{emp.totalHours}h</span>
-                          </div>
-                        ))}
-                        {weeklyViewData.employees.filter(emp => emp.shifts.length === 0).length > 0 && (
-                          <div className="sidebar-section-label">No Shifts</div>
-                        )}
-                        {weeklyViewData.employees.filter(emp => emp.shifts.length === 0).map(emp => (
-                          <div
-                            key={emp.userId}
-                            className="sidebar-employee no-shifts"
-                            onClick={() => loadUserPayWeeks(emp.userId)}
-                          >
-                            <span className="emp-name">{emp.userName}</span>
-                          </div>
-                        ))}
+                        {weeklyViewData.employees.map(emp => {
+                          const hasShifts = emp.shifts.length > 0;
+                          return (
+                            <div
+                              key={emp.userId}
+                              className={`sidebar-employee ${!hasShifts ? 'no-shifts' : ''}`}
+                              onClick={() => loadUserPayWeeks(emp.userId)}
+                              style={hasShifts ? { borderLeftColor: `hsl(${(emp.userId * 137) % 360}, 70%, 50%)` } : {}}
+                            >
+                              <span className="emp-name">{emp.userName}</span>
+                              {hasShifts && <span className="emp-hours">{emp.totalHours}h</span>}
+                            </div>
+                          );
+                        })}
                       </div>
 
                       {/* Calendar Grid - Row per Employee */}
@@ -6752,6 +6716,38 @@ function TimeClock() {
           )}
 
             </div>{/* End admin-main */}
+
+            {/* Right Sidebar - Recently Approved (only on pending tab) */}
+            {adminSubTab === 'pending' && (
+              <aside className="admin-right-sidebar">
+                <h4>Recently Approved</h4>
+                {approvedShifts.length === 0 ? (
+                  <p className="no-approved">No recent approvals</p>
+                ) : (
+                  <div className="approved-sidebar-list">
+                    {approvedShifts.map(shift => (
+                      <div
+                        key={shift.id}
+                        className="approved-sidebar-item"
+                        onClick={() => viewShiftDetails(shift.id)}
+                      >
+                        <div className="approved-item-header">
+                          <span className="approved-item-name">{shift.user_name}</span>
+                          <span className="approved-item-hours">{shift.totalHours || shift.total_hours}h</span>
+                        </div>
+                        <div className="approved-item-details">
+                          <span className="approved-item-date">{new Date(shift.date + 'T00:00:00').toLocaleDateString()}</span>
+                          <div className="approved-item-times">
+                            <span>{formatTime(shift.clockInTime || shift.clock_in_time)}</span>
+                            <span>{formatTime(shift.clockOutTime || shift.clock_out_time)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </aside>
+            )}
           </div>{/* End admin-layout */}
         </main>
       )}
