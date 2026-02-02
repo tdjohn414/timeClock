@@ -1366,6 +1366,10 @@ function TimeClock() {
 
   // Check if there are gaps between completed blocks
   const hasGaps = () => {
+    // If there's a gap widget placeholder, there's an unfilled gap
+    if (completedBlocks.some(b => b.isGapWidgetPlaceholder)) {
+      return true;
+    }
     if (completedBlocks.length < 2) return false;
     for (let i = 0; i < completedBlocks.length - 1; i++) {
       const currentEnd = completedBlocks[i].endTime;
