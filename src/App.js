@@ -5419,10 +5419,21 @@ function TimeClock() {
                     <span className="detail-label">Break Time</span>
                     <span className="detail-value">
                       {(() => {
+                        // Helper to extract HH:MM from ISO timestamp or time string
+                        const toTimeStr = (t) => {
+                          if (!t) return null;
+                          if (typeof t === 'string' && t.includes('T')) {
+                            const d = new Date(t);
+                            return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+                          }
+                          return t;
+                        };
                         const breakHours = (viewingShift.timeBlocks || [])
                           .filter(b => b.isBreak || b.is_break)
                           .reduce((sum, b) => {
-                            const hrs = calculateBlockHours(b.startTime || b.start_time, b.endTime || b.end_time);
+                            const start = toTimeStr(b.startTime || b.start_time);
+                            const end = toTimeStr(b.endTime || b.end_time);
+                            const hrs = calculateBlockHours(start, end);
                             return sum + (parseFloat(hrs) || 0);
                           }, 0);
                         return breakHours > 0 ? `${breakHours.toFixed(2)} hrs` : '0 hrs';
