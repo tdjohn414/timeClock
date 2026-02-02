@@ -242,6 +242,12 @@ function TimeClock() {
   const [weekSlideDirection, setWeekSlideDirection] = useState(null); // 'left' or 'right' for animation
   const [weeklyViewCache, setWeeklyViewCache] = useState({}); // Cache weekly data by weekStart
 
+  // Dashboard Leaderboard Week Navigation State
+  const [dashboardWeekStart, setDashboardWeekStart] = useState(null);
+  const [dashboardLeaderboard, setDashboardLeaderboard] = useState(null);
+  const [dashboardSlideDirection, setDashboardSlideDirection] = useState(null);
+  const [dashboardAvailableWeeks, setDashboardAvailableWeeks] = useState([]);
+
   // User Pay Weeks State
   const [viewingUserPayWeeks, setViewingUserPayWeeks] = useState(null);
   const [userPayWeeksData, setUserPayWeeksData] = useState(null);
@@ -357,6 +363,7 @@ function TimeClock() {
     if (activeTab === 'admin' && isAdmin) {
       if (adminSubTab === 'dashboard' && !dashboardData) {
         loadDashboard();
+        loadDashboardLeaderboard();
       } else if (adminSubTab === 'users' && adminUsers.length === 0) {
         loadAdminUsers();
       } else if (adminSubTab === 'shifts') {
@@ -465,6 +472,37 @@ function TimeClock() {
       setPendingCount(data.pendingApprovalCount || 0);
     } catch (err) {
       // Silently fail - this is just a background refresh
+    }
+  };
+
+  // Load dashboard leaderboard for a specific week
+  const loadDashboardLeaderboard = async (weekStart = null) => {
+    try {
+      // Calculate current week bounds if not specified
+      if (!weekStart) {
+        const bounds = getWeekBounds();
+        weekStart = bounds.weekStart;
+      }
+
+      // Load available weeks if not already loaded
+      let weeks = dashboardAvailableWeeks;
+      if (weeks.length === 0) {
+        const weeksData = await adminAPI.getAvailableWeeks();
+        weeks = weeksData.weeks || [];
+        setDashboardAvailableWeeks(weeks);
+      }
+
+      // Get weekly view data for the leaderboard
+      const data = await adminAPI.getWeeklyView(weekStart);
+      setDashboardWeekStart(data.weekStart);
+      setDashboardLeaderboard({
+        weekStart: data.weekStart,
+        weekEnd: data.weekEnd,
+        weekDisplay: data.weekDisplay,
+        employees: data.employees || []
+      });
+    } catch (err) {
+      console.error('Failed to load dashboard leaderboard:', err);
     }
   };
 
@@ -5378,12 +5416,22 @@ function TimeClock() {
                     <span className="detail-value highlight">{viewingShift.total_hours || '0'} hrs</span>
                   </div>
                   <div className="detail-row">
-                    <span className="detail-label">Status</span>
-                    <span className={`status-badge ${viewingShift.status}`}>{viewingShift.status?.replace('_', ' ')}</span>
+                    <span className="detail-label">Break Time</span>
+                    <span className="detail-value">
+                      {(() => {
+                        const breakHours = (viewingShift.timeBlocks || [])
+                          .filter(b => b.isBreak || b.is_break)
+                          .reduce((sum, b) => {
+                            const hrs = calculateBlockHours(b.startTime || b.start_time, b.endTime || b.end_time);
+                            return sum + (parseFloat(hrs) || 0);
+                          }, 0);
+                        return breakHours > 0 ? `${breakHours.toFixed(2)} hrs` : '0 hrs';
+                      })()}
+                    </span>
                   </div>
                   <div className="detail-row">
-                    <span className="detail-label">Shift ID</span>
-                    <span className="detail-value">#{viewingShift.id}</span>
+                    <span className="detail-label">Status</span>
+                    <span className={`status-badge ${viewingShift.status}`}>{viewingShift.status?.replace('_', ' ')}</span>
                   </div>
                 </div>
 
@@ -5591,24 +5639,73 @@ function TimeClock() {
                   </div>
 
                   <div className="dashboard-sections">
-                    <div className="dashboard-section">
-                      <h3 className="week-range">{(() => {
-                        // Calculate week bounds (Sunday to Saturday)
-                        const today = new Date();
-                        const day = today.getDay();
-                        const weekStart = new Date(today);
-                        weekStart.setDate(today.getDate() - day);
-                        const weekEnd = new Date(weekStart);
-                        weekEnd.setDate(weekStart.getDate() + 6);
-                        const formatD = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                        return `${formatD(weekStart)} - ${formatD(weekEnd)}`;
-                      })()}</h3>
-                      <div className="top-employees-list">
-                        {dashboardData.topEmployees?.slice(0, 5).map((emp, i) => (
-                          <div key={emp.id} className="top-employee" onClick={() => loadUserPayWeeks(emp.id)} style={{ cursor: 'pointer' }}>
+                    <div className="dashboard-section leaderboard-section">
+                      {/* Week Navigation Header */}
+                      <div className="leaderboard-week-nav">
+                        {(() => {
+                          // Check if we can go to previous week (has data)
+                          const hasPrevWeek = dashboardWeekStart && dashboardAvailableWeeks.some(w => w.weekStart < dashboardWeekStart);
+                          return hasPrevWeek ? (
+                            <button
+                              className="btn-leaderboard-arrow"
+                              onClick={() => {
+                                if (!dashboardWeekStart) return;
+                                setDashboardSlideDirection('right');
+                                const current = new Date(dashboardWeekStart + 'T12:00:00');
+                                current.setDate(current.getDate() - 7);
+                                const prevWeek = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
+                                loadDashboardLeaderboard(prevWeek);
+                                setTimeout(() => setDashboardSlideDirection(null), 300);
+                              }}
+                              title="Previous week"
+                            >
+                              ◀
+                            </button>
+                          ) : <span className="btn-leaderboard-arrow-placeholder" />;
+                        })()}
+                        <h3 className="week-range">{dashboardLeaderboard?.weekDisplay || (() => {
+                          const today = new Date();
+                          const day = today.getDay();
+                          const weekStart = new Date(today);
+                          weekStart.setDate(today.getDate() - day);
+                          const weekEnd = new Date(weekStart);
+                          weekEnd.setDate(weekStart.getDate() + 6);
+                          const formatD = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                          return `${formatD(weekStart)} - ${formatD(weekEnd)}`;
+                        })()}</h3>
+                        {(() => {
+                          // Check if we can go to next week (not past current week)
+                          const today = new Date();
+                          const dayOfWeek = today.getDay();
+                          const thisWeekSunday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - dayOfWeek, 12, 0, 0);
+                          const thisWeekStart = `${thisWeekSunday.getFullYear()}-${String(thisWeekSunday.getMonth() + 1).padStart(2, '0')}-${String(thisWeekSunday.getDate()).padStart(2, '0')}`;
+                          const canGoNext = dashboardWeekStart && dashboardWeekStart < thisWeekStart;
+                          return canGoNext ? (
+                            <button
+                              className="btn-leaderboard-arrow"
+                              onClick={() => {
+                                if (!dashboardWeekStart) return;
+                                setDashboardSlideDirection('left');
+                                const current = new Date(dashboardWeekStart + 'T12:00:00');
+                                current.setDate(current.getDate() + 7);
+                                const nextWeek = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
+                                loadDashboardLeaderboard(nextWeek <= thisWeekStart ? nextWeek : thisWeekStart);
+                                setTimeout(() => setDashboardSlideDirection(null), 300);
+                              }}
+                              title="Next week"
+                            >
+                              ▶
+                            </button>
+                          ) : <span className="btn-leaderboard-arrow-placeholder" />;
+                        })()}
+                      </div>
+                      {/* Leaderboard List with Slide Animation */}
+                      <div className={`top-employees-list ${dashboardSlideDirection ? `slide-${dashboardSlideDirection}` : ''}`}>
+                        {(dashboardLeaderboard?.employees || dashboardData.topEmployees)?.slice(0, 5).map((emp, i) => (
+                          <div key={emp.userId || emp.id} className="top-employee" onClick={() => loadUserPayWeeks(emp.userId || emp.id)} style={{ cursor: 'pointer' }}>
                             <span className="rank">#{i + 1}</span>
-                            <span className="name">{emp.name}</span>
-                            <span className="hours">{formatHours(emp.hours || 0)} hrs</span>
+                            <span className="name">{emp.userName || emp.name}</span>
+                            <span className="hours">{formatHours(emp.totalHours || emp.hours || 0)} hrs</span>
                           </div>
                         ))}
                       </div>

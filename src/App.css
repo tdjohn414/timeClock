@@ -3099,6 +3099,68 @@ html, body {
   font-weight: 600;
 }
 
+/* Leaderboard Week Navigation */
+.leaderboard-section {
+  overflow: hidden;
+}
+
+.leaderboard-week-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #eee;
+}
+
+.leaderboard-week-nav h3.week-range {
+  margin: 0;
+  padding: 0;
+  border: none;
+  font-size: 1.1rem;
+  min-width: 140px;
+  text-align: center;
+}
+
+.btn-leaderboard-arrow {
+  background: #f1f5f9;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  color: #64748b;
+  transition: all 0.2s ease;
+}
+
+.btn-leaderboard-arrow:hover {
+  background: #e2e8f0;
+  color: #3b82f6;
+}
+
+.btn-leaderboard-arrow-placeholder {
+  width: 32px;
+  height: 32px;
+}
+
+/* Leaderboard Slide Animations */
+.top-employees-list {
+  will-change: transform, opacity;
+}
+
+.top-employees-list.slide-left {
+  animation: slideInFromRight 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.top-employees-list.slide-right {
+  animation: slideInFromLeft 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
 /* Activity List */
 .activity-list {
   display: flex;
@@ -4320,6 +4382,7 @@ html, body {
   font-weight: 600;
   color: #7f8c8d;
   text-transform: uppercase;
+  min-width: 100px;
 }
 
 .shift-details-list .detail-value {
