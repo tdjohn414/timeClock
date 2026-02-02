@@ -105,6 +105,8 @@ function TimeClock() {
   const [editingOriginalIndex, setEditingOriginalIndex] = useState(null); // Track original position
   const [swipingBlockId, setSwipingBlockId] = useState(null);
   const [showCancelShiftConfirm, setShowCancelShiftConfirm] = useState(false); // Confirm cancel shift dialog
+  const [showDeleteBlockConfirm, setShowDeleteBlockConfirm] = useState(false); // Confirm delete block dialog
+  const [deleteBlockTarget, setDeleteBlockTarget] = useState(null); // Block to delete after confirmation
   const [testBlocks, setTestBlocks] = useState(5);
   const [testBreaks, setTestBreaks] = useState(2);
   const [activeTab, setActiveTab] = useState('today'); // 'today', 'history', or 'admin'
@@ -175,11 +177,14 @@ function TimeClock() {
   const [showGapModal, setShowGapModal] = useState(false);
   const [gapData, setGapData] = useState(null); // { startTime, endTime, pendingBlocks, gapIndex }
   const [gapTasks, setGapTasks] = useState(['']);
+  const [pendingGapPreset, setPendingGapPreset] = useState(null);
+  const [gapPresetDetail, setGapPresetDetail] = useState('');
   const [blocksBeforeEdit, setBlocksBeforeEdit] = useState(null); // For restoring on gap cancel
   const [gapAnimatingIndex, setGapAnimatingIndex] = useState(null); // Index where gap animation is happening
   const [slidingOutBlockId, setSlidingOutBlockId] = useState(null); // Block animating out for editing
   const [deletingBlockId, setDeletingBlockId] = useState(null); // Block animating out for deletion
   const [deleteGapSource, setDeleteGapSource] = useState(null); // 'delete' to track gap from deletion vs edit
+  const [newlyAddedBlockId, setNewlyAddedBlockId] = useState(null); // Track which block should animate in
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const dropdownRef = useRef(null);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -1172,6 +1177,10 @@ function TimeClock() {
 
     // Optimistic update - move to completed as swipe-out finishes
     setTimeout(() => {
+      // Track which block should animate in
+      setNewlyAddedBlockId(completedBlock.id);
+      setTimeout(() => setNewlyAddedBlockId(null), 300);
+
       // Move current block to completed immediately (optimistic)
       setCompletedBlocks(prev => [...prev, completedBlock]);
 
@@ -1237,24 +1246,28 @@ function TimeClock() {
     // Clear any existing toast
     setToast(null);
 
-    // Break starts where current block ends (or use current block's end time if set)
+    // Break starts where last completed block ended, or at current block start time
     let breakStartTime;
-    if (currentBlock.endTime) {
-      breakStartTime = currentBlock.endTime;
-    } else if (completedBlocks.length > 0) {
+    if (completedBlocks.length > 0) {
       breakStartTime = completedBlocks[completedBlocks.length - 1].endTime;
     } else {
       breakStartTime = currentBlock.startTime;
     }
 
+    if (!breakStartTime) return; // Need a start time
+
     const breakEndTime = addMinutesToTime(breakStartTime, 15);
 
-    // Complete current block first if it has content
-    const joinedTasks = joinTasks(currentTasks);
-    let workBlock = null;
+    // Store current block content to restore after break
+    const savedTasks = [...currentTasks];
+    const savedBlockContent = { ...currentBlock };
 
-    if (currentBlock.startTime && joinedTasks) {
-      workBlock = { ...currentBlock, tasks: joinedTasks, endTime: breakStartTime };
+    // Calculate how long the current block was (if it has start/end times)
+    let blockDuration = 0;
+    if (savedBlockContent.startTime && savedBlockContent.endTime) {
+      const startMins = timeToMinutes(savedBlockContent.startTime);
+      const endMins = timeToMinutes(savedBlockContent.endTime);
+      blockDuration = endMins - startMins;
     }
 
     // Create break block
@@ -1275,29 +1288,33 @@ function TimeClock() {
       // Trigger swipe animation on the break block
       setSwipingBlockId(breakBlock.id);
 
-      // Optimistic update - move to completed as swipe-out finishes
+      // Optimistic update - move break to completed
       setTimeout(() => {
-        // Add work block if exists, then break block
-        if (workBlock) {
-          setCompletedBlocks(prev => [...prev, workBlock, breakBlock]);
-        } else {
-          setCompletedBlocks(prev => [...prev, breakBlock]);
-        }
+        // Track which block should animate in
+        setNewlyAddedBlockId(breakBlock.id);
+        setTimeout(() => setNewlyAddedBlockId(null), 300);
 
-        // Create new current block starting after break
-        const newBlock = {
+        // Only add the break block (NOT the work block)
+        setCompletedBlocks(prev => [...prev, breakBlock]);
+
+        // Restore current block content with shifted times
+        // New start time is after the break
+        const newStartTime = breakEndTime;
+        // If there was a duration, preserve it; otherwise leave end time empty
+        const newEndTime = blockDuration > 0 ? addMinutesToTime(newStartTime, blockDuration) : '';
+
+        setCurrentBlock({
+          ...savedBlockContent,
           id: Date.now() + 1,
-          startTime: breakEndTime,
-          endTime: '',
-          tasks: ''
-        };
-        setCurrentBlock(newBlock);
-        setCurrentTasks(['']);
+          startTime: newStartTime,
+          endTime: newEndTime
+        });
+        setCurrentTasks(savedTasks);
         setSwipingBlockId(null);
       }, 150);
     });
 
-    // Save to server in background (non-blocking)
+    // Save break to server in background (non-blocking)
     (async () => {
       try {
         setAutoSaveStatus('saving');
@@ -1305,26 +1322,12 @@ function TimeClock() {
 
         // Create shift on server if this is the first block
         if (!shiftId) {
-          const startTimeForShift = workBlock ? workBlock.startTime : breakBlock.startTime;
-          const shift = await shiftsAPI.clockIn(currentDate, localTimeToUTC(startTimeForShift, currentDate));
+          const shift = await shiftsAPI.clockIn(currentDate, localTimeToUTC(breakStartTime, currentDate));
           shiftId = shift.id;
           setPendingShiftId(shiftId);
         }
 
-        // Save work block first if exists
-        if (workBlock) {
-          const savedWorkBlock = await shiftsAPI.addBlock(shiftId, {
-            startTime: localTimeToUTC(workBlock.startTime, currentDate),
-            endTime: localTimeToUTC(workBlock.endTime, currentDate),
-            tasks: workBlock.tasks,
-            isBreak: false
-          });
-          setCompletedBlocks(prev => prev.map(b =>
-            b.id === workBlock.id ? { ...b, serverId: savedWorkBlock.id } : b
-          ));
-        }
-
-        // Save break block
+        // Only save break block (work block stays in current block for user to submit later)
         const savedBreak = await shiftsAPI.addBlock(shiftId, {
           startTime: localTimeToUTC(breakBlock.startTime, currentDate),
           endTime: localTimeToUTC(breakBlock.endTime, currentDate),
@@ -1340,12 +1343,7 @@ function TimeClock() {
       } catch (err) {
         console.error('Failed to save break:', err);
         // Revert optimistic update on failure
-        setCompletedBlocks(prev => prev.filter(b => b.id !== breakBlock.id && (workBlock ? b.id !== workBlock.id : true)));
-        // Restore current block state
-        if (workBlock) {
-          setCurrentBlock({ ...workBlock, endTime: '' });
-          setCurrentTasks(workBlock.tasks ? workBlock.tasks.split(' • ') : ['']);
-        }
+        setCompletedBlocks(prev => prev.filter(b => b.id !== breakBlock.id));
         setAutoSaveStatus('error');
         setTimeout(() => setAutoSaveStatus('idle'), 3000);
       }
@@ -1362,6 +1360,50 @@ function TimeClock() {
     if (endMins <= startMins) endMins += 24 * 60; // Handle overnight
     const diff = endMins - startMins;
     return diff >= 15 && diff <= 120; // Valid if 15 mins to 2 hours
+  };
+
+  // Check if there are gaps between completed blocks
+  const hasGaps = () => {
+    if (completedBlocks.length < 2) return false;
+    for (let i = 0; i < completedBlocks.length - 1; i++) {
+      const currentEnd = completedBlocks[i].endTime;
+      const nextStart = completedBlocks[i + 1].startTime;
+      if (currentEnd !== nextStart) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Handle keyboard shortcuts for hour dropdowns
+  // If user presses a digit, auto-select matching hour if unambiguous
+  const handleHourKeyDown = (e, availableHours, onSelect) => {
+    const key = e.key;
+    if (!/^[0-9]$/.test(key)) return; // Only handle digit keys
+
+    const digit = key;
+
+    // Find hours that match this digit
+    const exactMatch = availableHours.find(h => String(h) === digit);
+    const startsWithMatch = availableHours.filter(h => String(h).startsWith(digit));
+
+    let selectedValue = null;
+    if (exactMatch && startsWithMatch.length === 1) {
+      // Exact single-digit match with no ambiguity (e.g., pressing "4" when 4 is available)
+      selectedValue = exactMatch;
+    } else if (!exactMatch && startsWithMatch.length === 1) {
+      // No exact match but only one option starts with this digit (e.g., pressing "1" when only 10 is available)
+      selectedValue = startsWithMatch[0];
+    }
+
+    if (selectedValue !== null) {
+      e.preventDefault();
+      e.stopPropagation();
+      onSelect(selectedValue);
+      // Blur to close the dropdown
+      e.target.blur();
+    }
+    // If multiple options start with the digit (e.g., 10, 11, 12), do nothing - let default behavior handle it
   };
 
   const updateCurrentBlock = (field, value) => {
@@ -1386,6 +1428,31 @@ function TimeClock() {
       }
     }
     setEditingBlock({ ...editingBlock, [field]: value });
+  };
+
+  // Update gap data with validation (same 2-hour max rule)
+  // Times cannot be cleared - they must stay within the gap boundaries
+  const updateGapData = (field, value) => {
+    if (!gapData) return;
+
+    // Don't allow clearing times - they must always have a value
+    if (!value) return;
+
+    if (field === 'startTime' && gapData.endTime) {
+      // If changing start time, check if end time is still valid
+      if (!isEndTimeValidForStart(value, gapData.endTime)) {
+        // Don't allow - would make end time invalid
+        return;
+      }
+    }
+    if (field === 'endTime' && gapData.startTime) {
+      // If changing end time, validate against start time
+      if (!isEndTimeValidForStart(gapData.startTime, value)) {
+        // Don't allow invalid end time
+        return;
+      }
+    }
+    setGapData({ ...gapData, [field]: value });
   };
 
   const handleEditBlock = (block) => {
@@ -1461,6 +1528,8 @@ function TimeClock() {
           gap: {
             startTime: savedBlock.endTime,
             endTime: nextBlock.startTime,
+            gapBoundaryStart: savedBlock.endTime,
+            gapBoundaryEnd: nextBlock.startTime,
             gapIndex: insertIndex + 1
           }
         };
@@ -1496,24 +1565,35 @@ function TimeClock() {
       const result = processBlocksAfterEdit(blocksWithoutPlaceholder, savedBlock, insertIndex);
 
       if (result.gap) {
-        // There's a gap - animate the gap opening, then show modal
+        // Track which block should animate in (the edited block returning)
+        setNewlyAddedBlockId(savedBlock.id);
+        setTimeout(() => setNewlyAddedBlockId(null), 300);
+
+        // There's a gap - animate the gap opening and show + button (no modal yet)
         setCompletedBlocks(result.blocks);
         setGapAnimatingIndex(result.gap.gapIndex);
 
-        // Prepare gap data but don't show modal yet
+        // Prepare gap data for the + button
         setGapData({
           ...result.gap,
           pendingBlocks: result.blocks
         });
         setGapTasks(['']);
-
-        // After animation completes, show the modal (keep gap visible)
-        setTimeout(() => {
-          setShowGapModal(true);
-        }, 500);
+        // Don't auto-show modal - user will click + button
       } else {
+        // Track which block should animate in (the edited block returning)
+        setNewlyAddedBlockId(savedBlock.id);
+        setTimeout(() => setNewlyAddedBlockId(null), 300);
+
         setCompletedBlocks(result.blocks);
-        setBlocksBeforeEdit(null);
+
+        // Check if this edit filled an existing gap
+        checkAndClearGapIfFilled(result.blocks);
+
+        // Only clear blocksBeforeEdit if no gap remains
+        if (!gapData) {
+          setBlocksBeforeEdit(null);
+        }
 
         // If the edited block is the last block and there's a current block,
         // update the current block's start time to match the edited block's end time
@@ -1534,6 +1614,13 @@ function TimeClock() {
   // Handle filling a gap
   const handleFillGap = () => {
     if (!gapData) return;
+
+    // Safety validation - ensure times are valid (15 min to 2 hours)
+    if (!gapData.startTime || !gapData.endTime) return;
+    if (!isEndTimeValidForStart(gapData.startTime, gapData.endTime)) {
+      // Block is invalid (>2hrs or <15min) - don't allow
+      return;
+    }
 
     const gapBlock = {
       id: Date.now(),
@@ -1560,6 +1647,8 @@ function TimeClock() {
         setGapData({
           startTime: gapBlock.endTime,
           endTime: nextBlock.startTime,
+          gapBoundaryStart: gapBlock.endTime,
+          gapBoundaryEnd: nextBlock.startTime,
           pendingBlocks: updatedBlocks,
           gapIndex: nextIndex
         });
@@ -1573,6 +1662,10 @@ function TimeClock() {
       }
     }
 
+    // Track which block should animate in
+    setNewlyAddedBlockId(gapBlock.id);
+    setTimeout(() => setNewlyAddedBlockId(null), 300); // Clear after animation
+
     setCompletedBlocks(updatedBlocks);
     setShowGapModal(false);
     setGapData(null);
@@ -1582,8 +1675,37 @@ function TimeClock() {
     setDeleteGapSource(null);
   };
 
-  const handleCancelGap = () => {
-    // Cancel gap fill - restore blocks to state before the edit/delete
+  // Close gap modal without filling - gap remains visible with + button
+  const handleCloseGapModal = () => {
+    setShowGapModal(false);
+
+    // Validate that gap still exists (gapAnimatingIndex must be within bounds and have blocks on both sides)
+    const gapStillValid = gapAnimatingIndex !== null &&
+      gapAnimatingIndex > 0 &&
+      gapAnimatingIndex < completedBlocks.length &&
+      gapData?.gapBoundaryStart &&
+      gapData?.gapBoundaryEnd;
+
+    if (gapStillValid && gapData) {
+      // Reset times to original boundaries so the gap display stays correct
+      setGapData({
+        ...gapData,
+        startTime: gapData.gapBoundaryStart,
+        endTime: gapData.gapBoundaryEnd
+      });
+      setGapTasks(['']);
+    } else {
+      // Gap is no longer valid, clear everything
+      setGapData(null);
+      setGapTasks(['']);
+      setGapAnimatingIndex(null);
+      setBlocksBeforeEdit(null);
+      setDeleteGapSource(null);
+    }
+  };
+
+  // Undo and restore blocks to state before the edit/delete
+  const handleUndoGapAction = () => {
     if (blocksBeforeEdit) {
       setCompletedBlocks(blocksBeforeEdit);
     }
@@ -1595,17 +1717,80 @@ function TimeClock() {
     setDeleteGapSource(null);
   };
 
-  const handleCancelEdit = () => {
-    // Replace the placeholder with the original block
-    if (editingBlockOriginal) {
-      setCompletedBlocks(completedBlocks.map(b =>
-        b.isEditingPlaceholder ? editingBlockOriginal : b
-      ));
+  // Check if gap is filled after edits to surrounding blocks
+  const checkAndClearGapIfFilled = (blocks) => {
+    if (!gapData || !gapAnimatingIndex) return;
+
+    // Gap is invalid if index is out of bounds
+    if (gapAnimatingIndex <= 0 || gapAnimatingIndex >= blocks.length) {
+      setGapAnimatingIndex(null);
+      setGapData(null);
+      setBlocksBeforeEdit(null);
+      setDeleteGapSource(null);
+      return;
     }
-    setEditingBlock(null);
-    setEditingBlockOriginal(null);
-    setEditingTasks(['']);
-    setEditingOriginalIndex(null);
+
+    const prevBlock = blocks[gapAnimatingIndex - 1];
+    const nextBlock = blocks[gapAnimatingIndex];
+
+    if (prevBlock && nextBlock) {
+      const prevEndMinutes = timeToMinutes(prevBlock.endTime);
+      const nextStartMinutes = timeToMinutes(nextBlock.startTime);
+
+      // Gap is filled if prev.endTime >= next.startTime
+      if (prevEndMinutes >= nextStartMinutes) {
+        // Animate gap closing
+        setGapAnimatingIndex(null);
+        setGapData(null);
+        setBlocksBeforeEdit(null);
+        setDeleteGapSource(null);
+      }
+    } else {
+      // Missing blocks means gap is invalid
+      setGapAnimatingIndex(null);
+      setGapData(null);
+      setBlocksBeforeEdit(null);
+      setDeleteGapSource(null);
+    }
+  };
+
+  // Handler for + button in gap
+  const handleGapPlusClick = () => {
+    if (gapData) {
+      setShowGapModal(true);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    if (!editingBlock || !editingBlockOriginal) {
+      setEditingBlock(null);
+      setEditingBlockOriginal(null);
+      setEditingTasks(['']);
+      setEditingOriginalIndex(null);
+      return;
+    }
+
+    // Trigger swipe-out animation on editing block
+    setSwipingBlockId(editingBlock.id);
+
+    // After animation, restore the original block with swipe-in
+    setTimeout(() => {
+      // Replace placeholder with original block and trigger swipe-in animation
+      const restoredBlock = { ...editingBlockOriginal };
+      setCompletedBlocks(completedBlocks.map(b =>
+        b.isEditingPlaceholder ? restoredBlock : b
+      ));
+      setNewlyAddedBlockId(restoredBlock.id);
+
+      setEditingBlock(null);
+      setEditingBlockOriginal(null);
+      setEditingTasks(['']);
+      setEditingOriginalIndex(null);
+      setSwipingBlockId(null);
+
+      // Clear the newly added animation after it completes
+      setTimeout(() => setNewlyAddedBlockId(null), 300);
+    }, 150);
   };
 
   const removeCompletedBlock = (id) => {
@@ -1645,26 +1830,45 @@ function TimeClock() {
         setBlocksBeforeEdit([...completedBlocks]);
         setDeleteGapSource('delete');
 
+        // Update blocks first
+        setCompletedBlocks(blocksAfterDelete);
+
         // Animate the gap opening
         setGapAnimatingIndex(gapIndex);
 
-        // Set up gap data and show modal after gap animation
+        // Set up gap data for the + button (no modal yet)
         setTimeout(() => {
           setGapData({
             startTime: gapStart,
             endTime: gapEnd,
+            gapBoundaryStart: gapStart,
+            gapBoundaryEnd: gapEnd,
             pendingBlocks: blocksAfterDelete,
             gapIndex: gapIndex
           });
           setGapTasks(['']);
-          setShowGapModal(true);
+          // Don't auto-show modal - user will click + button
         }, 400); // Match gap animation duration
-
-        // Update blocks (gap will be visible)
-        setCompletedBlocks(blocksAfterDelete);
       } else {
-        // No gap - just remove the block
+        // No new gap - just remove the block
         setCompletedBlocks(blocksAfterDelete);
+
+        // Check if existing gap is now invalid (user deleted blocks that defined the gap)
+        if (gapData) {
+          // If the deleted block was at or after the gap index, the gap end no longer exists
+          // Or if there are no more blocks after the gap start, clear the gap
+          const gapStillValid = gapData.gapIndex < blocksAfterDelete.length &&
+            blocksAfterDelete[gapData.gapIndex - 1] &&
+            blocksAfterDelete[gapData.gapIndex];
+
+          if (!gapStillValid) {
+            setGapData(null);
+            setGapTasks(['']);
+            setGapAnimatingIndex(null);
+            setBlocksBeforeEdit(null);
+            setDeleteGapSource(null);
+          }
+        }
       }
     }, 250); // Match slide-out animation duration
   };
@@ -2254,66 +2458,424 @@ function TimeClock() {
       {/* Gap Fill Modal */}
       {showGapModal && gapData && (
         <div className="modal-overlay">
-          <div className="preview-modal gap-modal">
+          <div className="preview-modal gap-modal gap-modal-full">
             <div className="modal-header">
               <h2>Fill Time Gap</h2>
+              <button className="modal-close" onClick={handleCloseGapModal}>&times;</button>
             </div>
             <div className="modal-body">
               <div className="gap-warning">
                 {deleteGapSource === 'delete'
-                  ? 'Deleting this block created a gap in the timeline. Please fill in what you worked on during this time.'
-                  : 'Your edit created a gap in the timeline. Please fill in what you worked on during this time.'}
+                  ? 'Deleting this block created a gap. Fill in what you worked on during this time, or edit surrounding blocks to close the gap.'
+                  : 'Your edit created a gap. Fill in what you worked on during this time, or edit surrounding blocks to close the gap.'}
               </div>
               <div className="gap-times">
                 <div className="time-field">
-                  <label>Gap Start</label>
-                  <div className="time-input-group">
-                    <input
-                      type="time"
-                      value={gapData.startTime}
-                      onChange={(e) => setGapData({ ...gapData, startTime: e.target.value })}
-                    />
+                  <label>Start</label>
+                  <div className="time-picker-group">
+                    {(() => {
+                      const parseTime = (timeStr) => {
+                        if (!timeStr) return { hour: '', minute: '', period: 'AM' };
+                        const [h, m] = timeStr.split(':').map(Number);
+                        return {
+                          hour: h === 0 ? 12 : h > 12 ? h - 12 : h,
+                          minute: String(m).padStart(2, '0'),
+                          period: h >= 12 ? 'PM' : 'AM'
+                        };
+                      };
+                      const buildTime = (hour, minute, period) => {
+                        if (!hour || minute === '') return '';
+                        let h = parseInt(hour);
+                        if (period === 'AM' && h === 12) h = 0;
+                        else if (period === 'PM' && h !== 12) h += 12;
+                        return `${String(h).padStart(2, '0')}:${minute}`;
+                      };
+
+                      // Get gap boundaries in minutes
+                      const boundaryStart = gapData.gapBoundaryStart || gapData.startTime;
+                      const boundaryEnd = gapData.gapBoundaryEnd || gapData.endTime;
+                      const [bsH, bsM] = boundaryStart.split(':').map(Number);
+                      const [beH, beM] = boundaryEnd.split(':').map(Number);
+                      const minMins = bsH * 60 + bsM;
+                      let maxMins = beH * 60 + beM - 15; // Leave room for at least 15 min block
+                      if (maxMins < minMins) maxMins += 24 * 60; // Handle overnight
+
+                      // Determine valid period based on gap boundaries
+                      const boundaryPeriod = bsH >= 12 ? 'PM' : 'AM';
+                      const endBoundaryPeriod = beH >= 12 ? 'PM' : 'AM';
+                      const canTogglePeriod = boundaryPeriod !== endBoundaryPeriod;
+
+                      const isValidStartTime = (totalMins) => {
+                        let adjMins = totalMins;
+                        if (adjMins < minMins - 12 * 60) adjMins += 24 * 60;
+                        return adjMins >= minMins && adjMins <= maxMins;
+                      };
+
+                      // Calculate valid hours
+                      const validHours = [];
+                      for (let displayH = 1; displayH <= 12; displayH++) {
+                        for (const period of [boundaryPeriod, endBoundaryPeriod]) {
+                          let h24 = displayH;
+                          if (period === 'AM' && displayH === 12) h24 = 0;
+                          else if (period === 'PM' && displayH !== 12) h24 += 12;
+                          for (const m of [0, 15, 30, 45]) {
+                            if (isValidStartTime(h24 * 60 + m)) {
+                              if (!validHours.includes(displayH)) validHours.push(displayH);
+                              break;
+                            }
+                          }
+                        }
+                      }
+
+                      const getPeriodForHour = (displayH) => {
+                        for (const period of [boundaryPeriod, endBoundaryPeriod]) {
+                          let h24 = displayH;
+                          if (period === 'AM' && displayH === 12) h24 = 0;
+                          else if (period === 'PM' && displayH !== 12) h24 += 12;
+                          for (const m of [0, 15, 30, 45]) {
+                            if (isValidStartTime(h24 * 60 + m)) return period;
+                          }
+                        }
+                        return boundaryPeriod;
+                      };
+
+                      const getMinutesForHour = (displayH, period) => {
+                        let h24 = displayH;
+                        if (period === 'AM' && displayH === 12) h24 = 0;
+                        else if (period === 'PM' && displayH !== 12) h24 += 12;
+                        const validMins = [];
+                        for (const m of ['00', '15', '30', '45']) {
+                          if (isValidStartTime(h24 * 60 + parseInt(m))) validMins.push(m);
+                        }
+                        return validMins.length > 0 ? validMins : ['00','15','30','45'];
+                      };
+
+                      const parsed = parseTime(gapData.startTime);
+                      const selectedHour = parsed.hour && validHours.includes(parsed.hour) ? parsed.hour : '';
+                      const correctPeriod = selectedHour ? getPeriodForHour(selectedHour) : boundaryPeriod;
+                      const validMinutes = selectedHour ? getMinutesForHour(selectedHour, correctPeriod) : ['00','15','30','45'];
+                      const selectedMinute = parsed.minute && validMinutes.includes(parsed.minute) ? parsed.minute : '';
+
+                      const selectGapStartHour = (hour) => {
+                        const period = getPeriodForHour(parseInt(hour));
+                        const mins = getMinutesForHour(parseInt(hour), period);
+                        const minute = mins.includes(parsed.minute) ? parsed.minute : mins[0] || '00';
+                        updateGapData('startTime', buildTime(hour, minute, period));
+                      };
+
+                      return (
+                        <>
+                          <select
+                            value={selectedHour}
+                            onChange={(e) => {
+                              const newHour = e.target.value;
+                              if (!newHour) { updateGapData('startTime', ''); return; }
+                              selectGapStartHour(newHour);
+                            }}
+                            onKeyDown={(e) => handleHourKeyDown(e, validHours, selectGapStartHour)}
+                            className="time-select hour-select"
+                          >
+                            <option value="">--</option>
+                            {validHours.map(h => (
+                              <option key={h} value={h}>{h}</option>
+                            ))}
+                          </select>
+                          <span className="time-separator">:</span>
+                          <select
+                            value={selectedMinute}
+                            onChange={(e) => updateGapData('startTime', buildTime(selectedHour || validHours[0], e.target.value, correctPeriod))}
+                            className="time-select minute-select"
+                          >
+                            <option value="">--</option>
+                            {validMinutes.map(m => (
+                              <option key={m} value={m}>{m}</option>
+                            ))}
+                          </select>
+                          <div className="period-toggle">
+                            <button
+                              type="button"
+                              className={`period-btn ${correctPeriod === 'AM' ? 'active' : ''}`}
+                              disabled={!canTogglePeriod}
+                            >AM</button>
+                            <button
+                              type="button"
+                              className={`period-btn ${correctPeriod === 'PM' ? 'active' : ''}`}
+                              disabled={!canTogglePeriod}
+                            >PM</button>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
                 <div className="time-field">
-                  <label>Gap End</label>
-                  <div className="time-input-group">
-                    <input
-                      type="time"
-                      value={gapData.endTime}
-                      onChange={(e) => setGapData({ ...gapData, endTime: e.target.value })}
-                    />
+                  <label>End</label>
+                  <div className="time-picker-group">
+                    {(() => {
+                      const parseTime = (timeStr) => {
+                        if (!timeStr) return { hour: '', minute: '', period: 'AM' };
+                        const [h, m] = timeStr.split(':').map(Number);
+                        return {
+                          hour: h === 0 ? 12 : h > 12 ? h - 12 : h,
+                          minute: String(m).padStart(2, '0'),
+                          period: h >= 12 ? 'PM' : 'AM'
+                        };
+                      };
+                      const buildTime = (hour, minute, period) => {
+                        if (!hour || minute === '') return '';
+                        let h = parseInt(hour);
+                        if (period === 'AM' && h === 12) h = 0;
+                        else if (period === 'PM' && h !== 12) h += 12;
+                        return `${String(h).padStart(2, '0')}:${minute}`;
+                      };
+
+                      // Get constraints: start time + 15 min to gap boundary end (max 2 hours from start)
+                      const boundaryEnd = gapData.gapBoundaryEnd || gapData.endTime;
+                      const [beH, beM] = boundaryEnd.split(':').map(Number);
+                      const boundaryEndMins = beH * 60 + beM;
+
+                      if (!gapData.startTime) {
+                        const boundaryPeriod = beH >= 12 ? 'PM' : 'AM';
+                        return (
+                          <>
+                            <select className="time-select hour-select" disabled><option>--</option></select>
+                            <span className="time-separator">:</span>
+                            <select className="time-select minute-select" disabled><option>--</option></select>
+                            <div className="period-toggle">
+                              <button type="button" className={`period-btn ${boundaryPeriod === 'AM' ? 'active' : ''}`} disabled>AM</button>
+                              <button type="button" className={`period-btn ${boundaryPeriod === 'PM' ? 'active' : ''}`} disabled>PM</button>
+                            </div>
+                          </>
+                        );
+                      }
+
+                      const [startH, startM] = gapData.startTime.split(':').map(Number);
+                      const startMins = startH * 60 + startM;
+                      const minEndMins = startMins + 15; // At least 15 min after start
+                      const maxEndMins = Math.min(startMins + 120, boundaryEndMins); // Max 2 hours or boundary
+
+                      const startPeriod = startH >= 12 ? 'PM' : 'AM';
+                      const endBoundaryPeriod = beH >= 12 ? 'PM' : 'AM';
+                      const canTogglePeriod = startPeriod !== endBoundaryPeriod;
+
+                      const isValidEndTime = (totalMins) => {
+                        let adjMins = totalMins;
+                        if (adjMins < startMins) adjMins += 24 * 60;
+                        let adjMax = maxEndMins;
+                        if (adjMax < startMins) adjMax += 24 * 60;
+                        return adjMins >= minEndMins && adjMins <= adjMax;
+                      };
+
+                      // Calculate valid hours
+                      const validHours = [];
+                      for (let displayH = 1; displayH <= 12; displayH++) {
+                        for (const period of [startPeriod, endBoundaryPeriod]) {
+                          let h24 = displayH;
+                          if (period === 'AM' && displayH === 12) h24 = 0;
+                          else if (period === 'PM' && displayH !== 12) h24 += 12;
+                          for (const m of [0, 15, 30, 45]) {
+                            if (isValidEndTime(h24 * 60 + m)) {
+                              if (!validHours.includes(displayH)) validHours.push(displayH);
+                              break;
+                            }
+                          }
+                        }
+                      }
+
+                      const getPeriodForHour = (displayH) => {
+                        for (const period of [startPeriod, endBoundaryPeriod]) {
+                          let h24 = displayH;
+                          if (period === 'AM' && displayH === 12) h24 = 0;
+                          else if (period === 'PM' && displayH !== 12) h24 += 12;
+                          for (const m of [0, 15, 30, 45]) {
+                            if (isValidEndTime(h24 * 60 + m)) return period;
+                          }
+                        }
+                        return startPeriod;
+                      };
+
+                      const getMinutesForHour = (displayH, period) => {
+                        let h24 = displayH;
+                        if (period === 'AM' && displayH === 12) h24 = 0;
+                        else if (period === 'PM' && displayH !== 12) h24 += 12;
+                        const validMins = [];
+                        for (const m of ['00', '15', '30', '45']) {
+                          if (isValidEndTime(h24 * 60 + parseInt(m))) validMins.push(m);
+                        }
+                        return validMins.length > 0 ? validMins : ['00','15','30','45'];
+                      };
+
+                      const parsed = parseTime(gapData.endTime);
+                      const selectedHour = parsed.hour && validHours.includes(parsed.hour) ? parsed.hour : '';
+                      const correctPeriod = selectedHour ? getPeriodForHour(selectedHour) : startPeriod;
+                      const validMinutes = selectedHour ? getMinutesForHour(selectedHour, correctPeriod) : ['00','15','30','45'];
+                      const selectedMinute = parsed.minute && validMinutes.includes(parsed.minute) ? parsed.minute : '';
+
+                      const selectGapEndHour = (hour) => {
+                        const period = getPeriodForHour(parseInt(hour));
+                        const mins = getMinutesForHour(parseInt(hour), period);
+                        const minute = mins.includes(parsed.minute) ? parsed.minute : mins[0] || '00';
+                        updateGapData('endTime', buildTime(hour, minute, period));
+                      };
+
+                      return (
+                        <>
+                          <select
+                            value={selectedHour}
+                            onChange={(e) => {
+                              const newHour = e.target.value;
+                              if (!newHour) { updateGapData('endTime', ''); return; }
+                              selectGapEndHour(newHour);
+                            }}
+                            onKeyDown={(e) => handleHourKeyDown(e, validHours, selectGapEndHour)}
+                            className="time-select hour-select"
+                          >
+                            <option value="">--</option>
+                            {validHours.map(h => (
+                              <option key={h} value={h}>{h}</option>
+                            ))}
+                          </select>
+                          <span className="time-separator">:</span>
+                          <select
+                            value={selectedMinute}
+                            onChange={(e) => updateGapData('endTime', buildTime(selectedHour || validHours[0], e.target.value, correctPeriod))}
+                            className="time-select minute-select"
+                          >
+                            <option value="">--</option>
+                            {validMinutes.map(m => (
+                              <option key={m} value={m}>{m}</option>
+                            ))}
+                          </select>
+                          <div className="period-toggle">
+                            <button
+                              type="button"
+                              className={`period-btn ${correctPeriod === 'AM' ? 'active' : ''}`}
+                              disabled={!canTogglePeriod}
+                            >AM</button>
+                            <button
+                              type="button"
+                              className={`period-btn ${correctPeriod === 'PM' ? 'active' : ''}`}
+                              disabled={!canTogglePeriod}
+                            >PM</button>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
               <div className="gap-duration">
                 Duration: <strong>{calculateBlockHours(gapData.startTime, gapData.endTime)} hrs</strong>
               </div>
+
+              {/* Preset Tasks */}
               <div className="task-field">
-                <label>What did you work on?</label>
-                {gapTasks.map((task, index) => (
-                  <div key={index} className="task-input-row">
+                <label>Quick Tasks</label>
+                <div className="preset-tasks-grid">
+                  {PRESET_TASK_NAMES.map(preset => (
+                    <button
+                      key={preset}
+                      type="button"
+                      className={`btn-preset-task ${pendingGapPreset === preset ? 'selected' : ''}`}
+                      onClick={() => {
+                        setPendingGapPreset(preset);
+                        setGapPresetDetail('');
+                      }}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Preset Detail Input */}
+              {pendingGapPreset && (
+                <div className="preset-detail-section">
+                  <label>{pendingGapPreset} - enter details:</label>
+                  <div className="preset-detail-row">
                     <input
                       type="text"
-                      value={task}
-                      onChange={(e) => {
-                        const newTasks = [...gapTasks];
-                        newTasks[index] = e.target.value;
-                        setGapTasks(newTasks);
-                      }}
-                      placeholder={index === 0 ? "Enter task..." : "Another task..."}
+                      value={gapPresetDetail}
+                      onChange={(e) => setGapPresetDetail(e.target.value)}
+                      placeholder="e.g., Jones, Smith, etc."
+                      autoFocus
                     />
-                    {gapTasks.length > 1 && (
-                      <button
-                        type="button"
-                        className="btn-remove-task"
-                        onClick={() => setGapTasks(gapTasks.filter((_, i) => i !== index))}
-                      >
-                        −
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="btn-add-preset"
+                      onClick={() => {
+                        if (gapPresetDetail.trim()) {
+                          const fullTask = `${pendingGapPreset} - ${gapPresetDetail.trim()}`;
+                          setGapTasks(prev => {
+                            const filtered = prev.filter(t => t.trim());
+                            return [...filtered, fullTask];
+                          });
+                          setPendingGapPreset(null);
+                          setGapPresetDetail('');
+                        }
+                      }}
+                      disabled={!gapPresetDetail.trim()}
+                    >
+                      Add
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-cancel-preset"
+                      onClick={() => {
+                        setPendingGapPreset(null);
+                        setGapPresetDetail('');
+                      }}
+                    >
+                      Cancel
+                    </button>
                   </div>
-                ))}
+                </div>
+              )}
+
+              {/* Custom Task Input */}
+              <div className="task-field">
+                <label>Or enter custom task:</label>
+                {gapTasks.map((task, index) => {
+                  const taskIsPreset = isPresetTask(task);
+                  return (
+                    <div key={index} className="task-input-row">
+                      {taskIsPreset ? (
+                        <div className="preset-task-display">
+                          <span className="preset-task-text">{task}</span>
+                          <button
+                            type="button"
+                            className="btn-remove-task"
+                            onClick={() => setGapTasks(gapTasks.filter((_, i) => i !== index))}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <input
+                            type="text"
+                            value={task}
+                            onChange={(e) => {
+                              const newTasks = [...gapTasks];
+                              newTasks[index] = e.target.value;
+                              setGapTasks(newTasks);
+                            }}
+                            placeholder={index === 0 ? "Enter task..." : "Another task..."}
+                          />
+                          {gapTasks.length > 1 && (
+                            <button
+                              type="button"
+                              className="btn-remove-task"
+                              onClick={() => setGapTasks(gapTasks.filter((_, i) => i !== index))}
+                            >
+                              −
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
                 <button
                   type="button"
                   className="btn-add-task"
@@ -2324,13 +2886,22 @@ function TimeClock() {
               </div>
             </div>
             <div className="modal-footer">
-              <button className="btn-cancel-modal" onClick={handleCancelGap}>
-                {deleteGapSource === 'delete' ? 'Undo Delete' : 'Cancel Edit'}
+              <button className="btn-cancel-modal" onClick={handleCloseGapModal}>
+                Close
               </button>
               <button
                 className="btn-confirm-modal"
-                onClick={handleFillGap}
-                disabled={!gapTasks.some(t => t.trim())}
+                onClick={() => {
+                  handleFillGap();
+                  setPendingGapPreset(null);
+                  setGapPresetDetail('');
+                }}
+                disabled={
+                  !gapTasks.some(t => t.trim()) ||
+                  !gapData?.startTime ||
+                  !gapData?.endTime ||
+                  !isEndTimeValidForStart(gapData?.startTime, gapData?.endTime)
+                }
               >
                 Fill Gap
               </button>
@@ -2598,6 +3169,44 @@ function TimeClock() {
         </div>
       )}
 
+      {/* Delete Block Confirmation Modal */}
+      {showDeleteBlockConfirm && deleteBlockTarget && (
+        <div className="modal-overlay">
+          <div className="preview-modal delete-block-modal">
+            <div className="modal-header">
+              <h2>Delete Block?</h2>
+            </div>
+            <div className="modal-body">
+              <p className="cancel-warning">Are you sure you want to delete this block?</p>
+              <p className="cancel-subtext">
+                {deleteBlockTarget.isBreak ? 'Break' : 'Block'}: {formatTime(deleteBlockTarget.startTime)} - {formatTime(deleteBlockTarget.endTime)}
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn-cancel-modal"
+                onClick={() => {
+                  setShowDeleteBlockConfirm(false);
+                  setDeleteBlockTarget(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-danger"
+                onClick={() => {
+                  removeCompletedBlock(deleteBlockTarget.id);
+                  setShowDeleteBlockConfirm(false);
+                  setDeleteBlockTarget(null);
+                }}
+              >
+                Yes, Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Auto-save indicator */}
       {autoSaveStatus !== 'idle' && (
         <div className={`auto-save-indicator ${autoSaveStatus}`}>
@@ -2853,41 +3462,186 @@ function TimeClock() {
                             else if (period === 'PM' && h !== 12) h += 12;
                             return `${String(h).padStart(2, '0')}:${minute}`;
                           };
+
+                          // Smart start time validation - constrained by prev/next blocks
+                          const getStartTimeConfig = () => {
+                            const fallback = {
+                              hours: [1,2,3,4,5,6,7,8,9,10,11,12],
+                              getPeriodForHour: () => {
+                                const p = parseTime(editingBlock.startTime);
+                                return p.period || 'AM';
+                              },
+                              getMinutesForHour: () => ['00','15','30','45'],
+                              canTogglePeriod: () => true
+                            };
+
+                            // Get constraints from surrounding blocks
+                            let minStartMins = null;
+                            let maxStartMins = null;
+
+                            // Previous block's end time is our minimum
+                            if (editingOriginalIndex !== null && editingOriginalIndex > 0) {
+                              const prevBlock = completedBlocks[editingOriginalIndex - 1];
+                              if (prevBlock && !prevBlock.isEditingPlaceholder && prevBlock.endTime) {
+                                const [ph, pm] = prevBlock.endTime.split(':').map(Number);
+                                minStartMins = ph * 60 + pm;
+                              }
+                            }
+
+                            // Next block's start time minus 15 min is our maximum
+                            if (editingOriginalIndex !== null && editingOriginalIndex + 1 < completedBlocks.length) {
+                              const nextBlock = completedBlocks[editingOriginalIndex + 1];
+                              if (nextBlock && !nextBlock.isEditingPlaceholder && nextBlock.startTime) {
+                                const [nh, nm] = nextBlock.startTime.split(':').map(Number);
+                                maxStartMins = nh * 60 + nm - 15;
+                              }
+                            }
+
+                            if (minStartMins === null && maxStartMins === null) return fallback;
+
+                            const isValidStartTime = (totalMins) => {
+                              let adjMins = totalMins;
+                              if (minStartMins !== null) {
+                                if (adjMins < minStartMins - 12 * 60) adjMins += 24 * 60;
+                                if (adjMins < minStartMins) return false;
+                              }
+                              if (maxStartMins !== null) {
+                                let adjMax = maxStartMins;
+                                if (minStartMins !== null && maxStartMins < minStartMins) adjMax += 24 * 60;
+                                if (adjMins > adjMax) return false;
+                              }
+                              return true;
+                            };
+
+                            const validHours = [];
+                            for (let displayH = 1; displayH <= 12; displayH++) {
+                              for (const period of ['AM', 'PM']) {
+                                let h24 = displayH;
+                                if (period === 'AM' && displayH === 12) h24 = 0;
+                                else if (period === 'PM' && displayH !== 12) h24 += 12;
+                                for (const m of [0, 15, 30, 45]) {
+                                  if (isValidStartTime(h24 * 60 + m)) {
+                                    if (!validHours.includes(displayH)) validHours.push(displayH);
+                                    break;
+                                  }
+                                }
+                              }
+                            }
+
+                            const getPeriodForHour = (displayH) => {
+                              for (const period of ['AM', 'PM']) {
+                                let h24 = displayH;
+                                if (period === 'AM' && displayH === 12) h24 = 0;
+                                else if (period === 'PM' && displayH !== 12) h24 += 12;
+                                for (const m of [0, 15, 30, 45]) {
+                                  if (isValidStartTime(h24 * 60 + m)) return period;
+                                }
+                              }
+                              return 'AM';
+                            };
+
+                            const getMinutesForHour = (displayH, period) => {
+                              let h24 = displayH;
+                              if (period === 'AM' && displayH === 12) h24 = 0;
+                              else if (period === 'PM' && displayH !== 12) h24 += 12;
+                              const validMins = [];
+                              for (const m of ['00', '15', '30', '45']) {
+                                if (isValidStartTime(h24 * 60 + parseInt(m))) validMins.push(m);
+                              }
+                              return validMins.length > 0 ? validMins : ['00','15','30','45'];
+                            };
+
+                            const canTogglePeriod = (displayH) => {
+                              let validInAM = false, validInPM = false;
+                              for (const m of [0, 15, 30, 45]) {
+                                let h24AM = displayH === 12 ? 0 : displayH;
+                                let h24PM = displayH === 12 ? 12 : displayH + 12;
+                                if (isValidStartTime(h24AM * 60 + m)) validInAM = true;
+                                if (isValidStartTime(h24PM * 60 + m)) validInPM = true;
+                              }
+                              return validInAM && validInPM;
+                            };
+
+                            return {
+                              hours: validHours.length > 0 ? validHours : [1,2,3,4,5,6,7,8,9,10,11,12],
+                              getPeriodForHour,
+                              getMinutesForHour,
+                              canTogglePeriod
+                            };
+                          };
+
+                          const startConfig = getStartTimeConfig();
                           const parsed = parseTime(editingBlock.startTime);
+                          const selectedHour = parsed.hour && startConfig.hours.includes(parsed.hour) ? parsed.hour : '';
+                          const correctPeriod = selectedHour ? startConfig.getPeriodForHour(selectedHour) : (parsed.period || 'AM');
+                          const validMinutes = selectedHour ? startConfig.getMinutesForHour(selectedHour, correctPeriod) : ['00','15','30','45'];
+                          const selectedMinute = parsed.minute && validMinutes.includes(parsed.minute) ? parsed.minute : '';
+                          const showPeriodToggle = selectedHour && startConfig.canTogglePeriod(selectedHour);
+
+                          const selectHour = (hour) => {
+                            const period = startConfig.getPeriodForHour(parseInt(hour));
+                            const mins = startConfig.getMinutesForHour(parseInt(hour), period);
+                            const minute = mins.includes(parsed.minute) ? parsed.minute : mins[0] || '00';
+                            updateEditingBlock('startTime', buildTime(hour, minute, period));
+                          };
+
                           return (
                             <>
                               <select
-                                value={parsed.hour}
-                                onChange={(e) => updateEditingBlock('startTime', buildTime(e.target.value, parsed.minute || '00', parsed.period))}
+                                value={selectedHour}
+                                onChange={(e) => {
+                                  const newHour = e.target.value;
+                                  if (!newHour) {
+                                    updateEditingBlock('startTime', '');
+                                    return;
+                                  }
+                                  selectHour(newHour);
+                                }}
+                                onKeyDown={(e) => handleHourKeyDown(e, startConfig.hours, selectHour)}
                                 className="time-select hour-select"
                               >
                                 <option value="">--</option>
-                                {[1,2,3,4,5,6,7,8,9,10,11,12].map(h => (
+                                {startConfig.hours.map(h => (
                                   <option key={h} value={h}>{h}</option>
                                 ))}
                               </select>
                               <span className="time-separator">:</span>
                               <select
-                                value={parsed.minute}
-                                onChange={(e) => updateEditingBlock('startTime', buildTime(parsed.hour || 12, e.target.value, parsed.period))}
+                                value={selectedMinute}
+                                onChange={(e) => {
+                                  updateEditingBlock('startTime', buildTime(selectedHour || startConfig.hours[0], e.target.value, correctPeriod));
+                                }}
                                 className="time-select minute-select"
                               >
                                 <option value="">--</option>
-                                <option value="00">00</option>
-                                <option value="15">15</option>
-                                <option value="30">30</option>
-                                <option value="45">45</option>
+                                {validMinutes.map(m => (
+                                  <option key={m} value={m}>{m}</option>
+                                ))}
                               </select>
                               <div className="period-toggle">
                                 <button
                                   type="button"
-                                  className={`period-btn ${parsed.period === 'AM' ? 'active' : ''}`}
-                                  onClick={() => parsed.hour && updateEditingBlock('startTime', buildTime(parsed.hour, parsed.minute || '00', 'AM'))}
+                                  className={`period-btn ${correctPeriod === 'AM' ? 'active' : ''}`}
+                                  disabled={!showPeriodToggle}
+                                  onClick={() => {
+                                    if (selectedHour && showPeriodToggle) {
+                                      const mins = startConfig.getMinutesForHour(selectedHour, 'AM');
+                                      const minute = mins.includes(selectedMinute) ? selectedMinute : mins[0] || '00';
+                                      updateEditingBlock('startTime', buildTime(selectedHour, minute, 'AM'));
+                                    }
+                                  }}
                                 >AM</button>
                                 <button
                                   type="button"
-                                  className={`period-btn ${parsed.period === 'PM' ? 'active' : ''}`}
-                                  onClick={() => parsed.hour && updateEditingBlock('startTime', buildTime(parsed.hour, parsed.minute || '00', 'PM'))}
+                                  className={`period-btn ${correctPeriod === 'PM' ? 'active' : ''}`}
+                                  disabled={!showPeriodToggle}
+                                  onClick={() => {
+                                    if (selectedHour && showPeriodToggle) {
+                                      const mins = startConfig.getMinutesForHour(selectedHour, 'PM');
+                                      const minute = mins.includes(selectedMinute) ? selectedMinute : mins[0] || '00';
+                                      updateEditingBlock('startTime', buildTime(selectedHour, minute, 'PM'));
+                                    }
+                                  }}
                                 >PM</button>
                               </div>
                             </>
@@ -2945,9 +3699,9 @@ function TimeClock() {
 
                             // Check for next block constraint (can't overlap)
                             let maxEndMins = null;
-                            if (editingOriginalIndex !== null && completedBlocks[editingOriginalIndex]) {
-                              const nextBlock = completedBlocks[editingOriginalIndex];
-                              if (nextBlock.startTime) {
+                            if (editingOriginalIndex !== null && editingOriginalIndex + 1 < completedBlocks.length) {
+                              const nextBlock = completedBlocks[editingOriginalIndex + 1];
+                              if (nextBlock && !nextBlock.isEditingPlaceholder && nextBlock.startTime) {
                                 const [nh, nm] = nextBlock.startTime.split(':').map(Number);
                                 maxEndMins = nh * 60 + nm;
                                 // Handle overnight: if next block starts before current start, it's next day
@@ -3035,6 +3789,13 @@ function TimeClock() {
                           const validMinutes = selectedHour ? endConfig.getMinutesForHour(selectedHour) : ['00','15','30','45'];
                           const showPeriodToggle = selectedHour && endConfig.canTogglePeriod(selectedHour);
 
+                          const selectEndHour = (hour) => {
+                            const period = endConfig.getPeriodForHour(parseInt(hour));
+                            const mins = endConfig.getMinutesForHour(parseInt(hour));
+                            const minute = mins.includes(parsed.minute) ? parsed.minute : mins[0] || '00';
+                            updateEditingBlock('endTime', buildTime(hour, minute, period));
+                          };
+
                           return (
                             <>
                               <select
@@ -3045,11 +3806,9 @@ function TimeClock() {
                                     updateEditingBlock('endTime', '');
                                     return;
                                   }
-                                  const period = endConfig.getPeriodForHour(parseInt(newHour));
-                                  const mins = endConfig.getMinutesForHour(parseInt(newHour));
-                                  const minute = mins.includes(parsed.minute) ? parsed.minute : mins[0] || '00';
-                                  updateEditingBlock('endTime', buildTime(newHour, minute, period));
+                                  selectEndHour(newHour);
                                 }}
+                                onKeyDown={(e) => handleHourKeyDown(e, endConfig.hours, selectEndHour)}
                                 className="time-select hour-select"
                               >
                                 <option value="">--</option>
@@ -3190,16 +3949,23 @@ function TimeClock() {
                           };
                           const parsed = parseTime(currentBlock.startTime);
                           const isLocked = completedBlocks.length > 0;
+                          const allHours = [1,2,3,4,5,6,7,8,9,10,11,12];
+                          const selectStartHour = (hour) => {
+                            if (!isLocked) {
+                              updateCurrentBlock('startTime', buildTime(hour, parsed.minute || '00', parsed.period));
+                            }
+                          };
                           return (
                             <>
                               <select
                                 value={parsed.hour}
-                                onChange={(e) => !isLocked && updateCurrentBlock('startTime', buildTime(e.target.value, parsed.minute || '00', parsed.period))}
+                                onChange={(e) => selectStartHour(e.target.value)}
+                                onKeyDown={(e) => !isLocked && handleHourKeyDown(e, allHours, selectStartHour)}
                                 disabled={isLocked}
                                 className={`time-select hour-select ${isLocked ? 'locked-input' : ''}`}
                               >
                                 <option value="">--</option>
-                                {[1,2,3,4,5,6,7,8,9,10,11,12].map(h => (
+                                {allHours.map(h => (
                                   <option key={h} value={h}>{h}</option>
                                 ))}
                               </select>
@@ -3359,6 +4125,13 @@ function TimeClock() {
                           const validMinutes = selectedHour ? endConfig.getMinutesForHour(selectedHour) : ['00','15','30','45'];
                           const showPeriodToggle = selectedHour && endConfig.canTogglePeriod(selectedHour);
 
+                          const selectEndHour = (hour) => {
+                            const period = endConfig.getPeriodForHour(parseInt(hour));
+                            const mins = endConfig.getMinutesForHour(parseInt(hour));
+                            const minute = mins.includes(parsed.minute) ? parsed.minute : mins[0] || '00';
+                            updateCurrentBlock('endTime', buildTime(hour, minute, period));
+                          };
+
                           return (
                             <>
                               <select
@@ -3369,11 +4142,9 @@ function TimeClock() {
                                     updateCurrentBlock('endTime', '');
                                     return;
                                   }
-                                  const period = endConfig.getPeriodForHour(parseInt(newHour));
-                                  const mins = endConfig.getMinutesForHour(parseInt(newHour));
-                                  const minute = mins.includes(parsed.minute) ? parsed.minute : mins[0] || '00';
-                                  updateCurrentBlock('endTime', buildTime(newHour, minute, period));
+                                  selectEndHour(newHour);
                                 }}
+                                onKeyDown={(e) => handleHourKeyDown(e, endConfig.hours, selectEndHour)}
                                 className="time-select hour-select"
                               >
                                 <option value="">--</option>
@@ -3599,8 +4370,15 @@ function TimeClock() {
                 )}
                 <button
                   type="button"
-                  className="btn-save"
-                  onClick={previewShift}
+                  className={`btn-save ${hasGaps() ? 'has-gaps' : ''}`}
+                  onClick={() => {
+                    if (hasGaps()) {
+                      setToast({ type: 'error', message: 'Please fill in the gaps between your time blocks before clocking out.' });
+                      setTimeout(() => setToast(null), 4000);
+                      return;
+                    }
+                    previewShift();
+                  }}
                   disabled={(completedBlocks.length === 0 && !currentBlock) || saving}
                 >
                   {saving ? 'Saving...' : 'Clock Out'}
@@ -3624,75 +4402,106 @@ function TimeClock() {
                     .slice(0, index + 1)
                     .filter(b => !b.isBreak).length;
 
-                  // Gap animation classes
-                  const isBeforeGap = gapAnimatingIndex !== null && index === gapAnimatingIndex - 1;
-                  const isAfterGap = gapAnimatingIndex !== null && index === gapAnimatingIndex;
+                  // Gap animation classes - only valid between blocks (not after the last one)
+                  const isBeforeGap = gapAnimatingIndex !== null && index === gapAnimatingIndex - 1 && index < completedBlocks.length - 1;
+                  const isAfterGap = gapAnimatingIndex !== null && index === gapAnimatingIndex && gapAnimatingIndex < completedBlocks.length;
 
                   // Slide-out animation classes
                   const isSlidingOut = slidingOutBlockId === block.id;
                   const isDeleting = deletingBlockId === block.id;
+                  const isNewlyAdded = newlyAddedBlockId === block.id;
 
-                  // Show placeholder for blocks being edited
+                  // Show placeholder for blocks being edited - same structure as real block for consistent height
                   if (block.isEditingPlaceholder) {
+                    const taskCount = block.tasks ? block.tasks.split(' • ').length : 1;
                     return (
-                      <div key={block.id} className="completed-block editing-placeholder">
-                        <div className="placeholder-content">
-                          <span className="placeholder-label">
-                            {block.isBreak ? 'Break' : `Block #${workBlockNumber}`}
+                      <div key={block.id} className={`completed-block editing-placeholder ${block.isBreak ? 'break-block' : ''}`}>
+                        <div className="completed-block-row">
+                          <span className="completed-number placeholder-fade">
+                            {block.isBreak ? 'Break' : `#${workBlockNumber}`}
                           </span>
-                          <span className="placeholder-text">Editing...</span>
+                          <span className="completed-time placeholder-fade">
+                            {formatTime(block.startTime)} - {formatTime(block.endTime)}
+                          </span>
+                          <span className="completed-hours placeholder-fade">
+                            {calculateBlockHours(block.startTime, block.endTime)}hr
+                          </span>
+                          <span className="placeholder-editing-badge">Editing...</span>
+                        </div>
+                        <div className={`completed-task ${taskCount > 1 ? 'multi-task' : ''}`}>
+                          {block.tasks.split(' • ').map((task, i) => (
+                            <div key={i} className="task-line placeholder-fade">{task}</div>
+                          ))}
                         </div>
                       </div>
                     );
                   }
 
                   return (
-                  <div
-                    key={block.id}
-                    className={`completed-block ${block.isBreak ? 'break-block' : ''} ${isBeforeGap ? 'gap-shrink' : ''} ${isAfterGap ? 'gap-expand' : ''} ${isSlidingOut ? 'sliding-out' : ''} ${isDeleting ? 'deleting' : ''}`}
-                  >
-                    <div className="completed-block-row">
-                      <span className="completed-number">
-                        {block.isBreak ? 'Break' : `#${workBlockNumber}`}
-                      </span>
-                      <span className="completed-time">
-                        {formatTime(block.startTime)} - {formatTime(block.endTime)}
-                      </span>
-                      <span className="completed-hours">
-                        {calculateBlockHours(block.startTime, block.endTime)}hr
-                      </span>
-                      <div className="completed-actions">
-                        <button
-                          type="button"
-                          className={`btn-icon btn-edit-icon ${block.isBreak ? 'btn-extend-break' : ''}`}
-                          onClick={() => handleEditBlock(block)}
-                          disabled={editingBlock !== null || slidingOutBlockId !== null || deletingBlockId !== null}
-                          title={block.isBreak ? 'Extend Break' : 'Edit'}
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-icon btn-delete-icon"
-                          onClick={() => removeCompletedBlock(block.id)}
-                          disabled={slidingOutBlockId !== null || deletingBlockId !== null}
-                          title="Delete"
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="3 6 5 6 21 6"/>
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                          </svg>
-                        </button>
+                  <React.Fragment key={block.id}>
+                    <div
+                      className={`completed-block ${block.isBreak ? 'break-block' : ''} ${isBeforeGap ? 'gap-shrink' : ''} ${isAfterGap ? 'gap-expand' : ''} ${isSlidingOut ? 'sliding-out' : ''} ${isDeleting ? 'deleting' : ''} ${isNewlyAdded ? 'swipe-in' : ''}`}
+                    >
+                      <div className="completed-block-row">
+                        <span className="completed-number">
+                          {block.isBreak ? 'Break' : `#${workBlockNumber}`}
+                        </span>
+                        <span className="completed-time">
+                          {formatTime(block.startTime)} - {formatTime(block.endTime)}
+                        </span>
+                        <div className="completed-actions">
+                          <button
+                            type="button"
+                            className={`btn-icon btn-edit-icon ${block.isBreak ? 'btn-extend-break' : ''}`}
+                            onClick={() => handleEditBlock(block)}
+                            disabled={editingBlock !== null || slidingOutBlockId !== null || deletingBlockId !== null}
+                            title={block.isBreak ? 'Extend Break' : 'Edit'}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-icon btn-delete-icon"
+                            onClick={() => {
+                              setDeleteBlockTarget(block);
+                              setShowDeleteBlockConfirm(true);
+                            }}
+                            disabled={slidingOutBlockId !== null || deletingBlockId !== null}
+                            title="Delete"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="3 6 5 6 21 6"/>
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            </svg>
+                          </button>
+                        </div>
+                        <span className="completed-hours">
+                          {calculateBlockHours(block.startTime, block.endTime)}hr
+                        </span>
+                      </div>
+                      <div className={`completed-task ${block.tasks.split(' • ').length > 1 ? 'multi-task' : ''}`}>
+                        {block.tasks.split(' • ').map((task, i) => (
+                          <div key={i} className="task-line">{task}</div>
+                        ))}
                       </div>
                     </div>
-                    <div className={`completed-task ${block.tasks.split(' • ').length > 1 ? 'multi-task' : ''}`}>
-                      {block.tasks.split(' • ').map((task, i) => (
-                        <div key={i} className="task-line">{task}</div>
-                      ))}
-                    </div>
-                  </div>
+                    {/* Show + button in gap after this block - only between blocks, never after the last one */}
+                    {isBeforeGap && gapData && !showGapModal && !editingBlock && index < completedBlocks.length - 1 && gapData.startTime && gapData.endTime && (
+                      <div className="gap-fill-button-container">
+                        <button
+                          type="button"
+                          className="gap-fill-button"
+                          onClick={handleGapPlusClick}
+                          title={`Fill gap: ${formatTime(gapData.gapBoundaryStart || gapData.startTime)} - ${formatTime(gapData.gapBoundaryEnd || gapData.endTime)}`}
+                        >
+                          <span className="gap-fill-plus">+</span>
+                          <span className="gap-fill-time">{formatTime(gapData.gapBoundaryStart || gapData.startTime)} - {formatTime(gapData.gapBoundaryEnd || gapData.endTime)}</span>
+                        </button>
+                      </div>
+                    )}
+                  </React.Fragment>
                   );
                 })}
               </div>
