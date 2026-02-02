@@ -177,10 +177,12 @@ function TimeClock() {
   const [showGapModal, setShowGapModal] = useState(false);
   const [gapData, setGapData] = useState(null); // { startTime, endTime, pendingBlocks, gapIndex }
   const [gapTasks, setGapTasks] = useState(['']);
+  const [gapIsBreak, setGapIsBreak] = useState(false); // Fill gap as break
   const [pendingGapPreset, setPendingGapPreset] = useState(null);
   const [gapPresetDetail, setGapPresetDetail] = useState('');
   const [blocksBeforeEdit, setBlocksBeforeEdit] = useState(null); // For restoring on gap cancel
   const [gapAnimatingIndex, setGapAnimatingIndex] = useState(null); // Index where gap animation is happening
+  const [gapAttentionPulse, setGapAttentionPulse] = useState(false); // Pulse animation to draw attention to gap
   const [slidingOutBlockId, setSlidingOutBlockId] = useState(null); // Block animating out for editing
   const [deletingBlockId, setDeletingBlockId] = useState(null); // Block animating out for deletion
   const [deleteGapSource, setDeleteGapSource] = useState(null); // 'delete' to track gap from deletion vs edit
@@ -1381,6 +1383,10 @@ function TimeClock() {
     const key = e.key;
     if (!/^[0-9]$/.test(key)) return; // Only handle digit keys
 
+    // Always prevent default to stop browser's native type-ahead
+    e.preventDefault();
+    e.stopPropagation();
+
     const digit = key;
 
     // Find hours that match this digit
@@ -1388,22 +1394,20 @@ function TimeClock() {
     const startsWithMatch = availableHours.filter(h => String(h).startsWith(digit));
 
     let selectedValue = null;
-    if (exactMatch && startsWithMatch.length === 1) {
-      // Exact single-digit match with no ambiguity (e.g., pressing "4" when 4 is available)
+    if (exactMatch) {
+      // Exact single-digit match (e.g., pressing "4" selects 4)
       selectedValue = exactMatch;
-    } else if (!exactMatch && startsWithMatch.length === 1) {
+    } else if (startsWithMatch.length === 1) {
       // No exact match but only one option starts with this digit (e.g., pressing "1" when only 10 is available)
       selectedValue = startsWithMatch[0];
     }
+    // If multiple 2-digit options start with the digit (e.g., 10, 11, 12), do nothing
 
     if (selectedValue !== null) {
-      e.preventDefault();
-      e.stopPropagation();
       onSelect(selectedValue);
       // Blur to close the dropdown
       e.target.blur();
     }
-    // If multiple options start with the digit (e.g., 10, 11, 12), do nothing - let default behavior handle it
   };
 
   const updateCurrentBlock = (field, value) => {
@@ -1579,6 +1583,7 @@ function TimeClock() {
           pendingBlocks: result.blocks
         });
         setGapTasks(['']);
+        setGapIsBreak(false);
         // Don't auto-show modal - user will click + button
       } else {
         // Track which block should animate in (the edited block returning)
@@ -1622,12 +1627,16 @@ function TimeClock() {
       return;
     }
 
+    // Calculate break duration for task label
+    const breakDuration = gapIsBreak ? calculateBlockHours(gapData.startTime, gapData.endTime) : null;
+    const breakTaskLabel = breakDuration ? `${Math.round(parseFloat(breakDuration) * 60)} min Break` : 'Break';
+
     const gapBlock = {
       id: Date.now(),
       startTime: gapData.startTime,
       endTime: gapData.endTime,
-      tasks: joinTasks(gapTasks),
-      isBreak: false
+      tasks: gapIsBreak ? breakTaskLabel : joinTasks(gapTasks),
+      isBreak: gapIsBreak
     };
 
     // Insert the gap block
@@ -1644,6 +1653,17 @@ function TimeClock() {
 
       // Still a gap?
       if (gapEndMinutes < nextStartMinutes) {
+        // Track which block should animate in
+        setNewlyAddedBlockId(gapBlock.id);
+        setTimeout(() => setNewlyAddedBlockId(null), 300);
+
+        // Update blocks and close modal, but keep gap data for the widget
+        setCompletedBlocks(updatedBlocks);
+        setShowGapModal(false);
+        setGapTasks(['']);
+        setGapIsBreak(false);
+
+        // Update gap data with new boundaries (for the + button widget)
         setGapData({
           startTime: gapBlock.endTime,
           endTime: nextBlock.startTime,
@@ -1652,8 +1672,8 @@ function TimeClock() {
           pendingBlocks: updatedBlocks,
           gapIndex: nextIndex
         });
-        setGapTasks(['']);
-        return; // Keep modal open
+        setGapAnimatingIndex(nextIndex);
+        return;
       }
 
       // Overlap? Adjust next block
@@ -1670,6 +1690,7 @@ function TimeClock() {
     setShowGapModal(false);
     setGapData(null);
     setGapTasks(['']);
+        setGapIsBreak(false);
     setBlocksBeforeEdit(null);
     setGapAnimatingIndex(null);
     setDeleteGapSource(null);
@@ -1694,10 +1715,12 @@ function TimeClock() {
         endTime: gapData.gapBoundaryEnd
       });
       setGapTasks(['']);
+        setGapIsBreak(false);
     } else {
       // Gap is no longer valid, clear everything
       setGapData(null);
       setGapTasks(['']);
+        setGapIsBreak(false);
       setGapAnimatingIndex(null);
       setBlocksBeforeEdit(null);
       setDeleteGapSource(null);
@@ -1712,6 +1735,7 @@ function TimeClock() {
     setShowGapModal(false);
     setGapData(null);
     setGapTasks(['']);
+        setGapIsBreak(false);
     setBlocksBeforeEdit(null);
     setGapAnimatingIndex(null);
     setDeleteGapSource(null);
@@ -1823,47 +1847,84 @@ function TimeClock() {
     // After animation, handle the deletion
     setTimeout(() => {
       setDeletingBlockId(null);
-      const blocksAfterDelete = completedBlocks.filter(b => b.id !== id);
 
       if (createsGap) {
         // Store blocks before deletion for cancel restore
         setBlocksBeforeEdit([...completedBlocks]);
         setDeleteGapSource('delete');
 
-        // Update blocks first
-        setCompletedBlocks(blocksAfterDelete);
+        // Replace deleted block with a gap widget placeholder - no position changes for other blocks
+        const blocksWithGapPlaceholder = completedBlocks.map(b =>
+          b.id === id ? {
+            ...b,
+            isGapWidgetPlaceholder: true,
+            gapStartTime: gapStart,
+            gapEndTime: gapEnd
+          } : b
+        );
+        setCompletedBlocks(blocksWithGapPlaceholder);
 
-        // Animate the gap opening
-        setGapAnimatingIndex(gapIndex);
-
-        // Set up gap data for the + button (no modal yet)
-        setTimeout(() => {
-          setGapData({
-            startTime: gapStart,
-            endTime: gapEnd,
-            gapBoundaryStart: gapStart,
-            gapBoundaryEnd: gapEnd,
-            pendingBlocks: blocksAfterDelete,
-            gapIndex: gapIndex
-          });
-          setGapTasks(['']);
-          // Don't auto-show modal - user will click + button
-        }, 400); // Match gap animation duration
+        // Set up gap data immediately (no separate gapAnimatingIndex needed)
+        setGapData({
+          startTime: gapStart,
+          endTime: gapEnd,
+          gapBoundaryStart: gapStart,
+          gapBoundaryEnd: gapEnd,
+          pendingBlocks: blocksWithGapPlaceholder.filter(b => !b.isGapWidgetPlaceholder),
+          gapIndex: gapIndex,
+          placeholderId: id  // Track which block is the placeholder
+        });
+        setGapTasks(['']);
+        setGapIsBreak(false);
+        // Don't set gapAnimatingIndex - we don't want margin animations
       } else {
-        // No new gap - just remove the block
+        // Check if there's a gap widget placeholder in completedBlocks
+        const gapPlaceholder = completedBlocks.find(b => b.isGapWidgetPlaceholder);
+        const blocksAfterDelete = completedBlocks.filter(b => b.id !== id);
+
+        if (gapPlaceholder) {
+          // Check if we deleted the last block after the gap placeholder
+          const placeholderIndex = blocksAfterDelete.findIndex(b => b.isGapWidgetPlaceholder);
+          const hasBlocksAfterPlaceholder = placeholderIndex >= 0 && placeholderIndex < blocksAfterDelete.length - 1;
+
+          if (!hasBlocksAfterPlaceholder) {
+            // No more blocks after the gap - dismiss gap widget and clean up
+            const blocksWithoutPlaceholder = blocksAfterDelete.filter(b => !b.isGapWidgetPlaceholder);
+            setCompletedBlocks(blocksWithoutPlaceholder);
+
+            // Update current block start time to end time of last remaining block
+            if (blocksWithoutPlaceholder.length > 0) {
+              const lastBlock = blocksWithoutPlaceholder[blocksWithoutPlaceholder.length - 1];
+              setCurrentBlock(prev => ({ ...prev, startTime: lastBlock.endTime }));
+            }
+
+            // Clear all gap-related state
+            setGapData(null);
+            setGapTasks(['']);
+            setGapIsBreak(false);
+            setGapAnimatingIndex(null);
+            setBlocksBeforeEdit(null);
+            setDeleteGapSource(null);
+            return;
+          }
+        }
+
+        // No gap placeholder or still have blocks after it - just remove the block
         setCompletedBlocks(blocksAfterDelete);
 
         // Check if existing gap is now invalid (user deleted blocks that defined the gap)
         if (gapData) {
           // If the deleted block was at or after the gap index, the gap end no longer exists
           // Or if there are no more blocks after the gap start, clear the gap
-          const gapStillValid = gapData.gapIndex < blocksAfterDelete.length &&
-            blocksAfterDelete[gapData.gapIndex - 1] &&
-            blocksAfterDelete[gapData.gapIndex];
+          const realBlocks = blocksAfterDelete.filter(b => !b.isGapWidgetPlaceholder);
+          const gapStillValid = gapData.gapIndex < realBlocks.length &&
+            realBlocks[gapData.gapIndex - 1] &&
+            realBlocks[gapData.gapIndex];
 
           if (!gapStillValid) {
             setGapData(null);
             setGapTasks(['']);
+            setGapIsBreak(false);
             setGapAnimatingIndex(null);
             setBlocksBeforeEdit(null);
             setDeleteGapSource(null);
@@ -2768,8 +2829,26 @@ function TimeClock() {
                 Duration: <strong>{calculateBlockHours(gapData.startTime, gapData.endTime)} hrs</strong>
               </div>
 
+              {/* Break Checkbox */}
+              <div className="gap-break-option">
+                <label className="break-checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={gapIsBreak}
+                    onChange={(e) => {
+                      setGapIsBreak(e.target.checked);
+                      if (e.target.checked) {
+                        setPendingGapPreset(null);
+                        setGapPresetDetail('');
+                      }
+                    }}
+                  />
+                  <span>Break</span>
+                </label>
+              </div>
+
               {/* Preset Tasks */}
-              <div className="task-field">
+              <div className={`task-field ${gapIsBreak ? 'disabled-section' : ''}`}>
                 <label>Quick Tasks</label>
                 <div className="preset-tasks-grid">
                   {PRESET_TASK_NAMES.map(preset => (
@@ -2781,6 +2860,7 @@ function TimeClock() {
                         setPendingGapPreset(preset);
                         setGapPresetDetail('');
                       }}
+                      disabled={gapIsBreak}
                     >
                       {preset}
                     </button>
@@ -2833,7 +2913,7 @@ function TimeClock() {
               )}
 
               {/* Custom Task Input */}
-              <div className="task-field">
+              <div className={`task-field ${gapIsBreak ? 'disabled-section' : ''}`}>
                 <label>Or enter custom task:</label>
                 {gapTasks.map((task, index) => {
                   const taskIsPreset = isPresetTask(task);
@@ -2846,6 +2926,7 @@ function TimeClock() {
                             type="button"
                             className="btn-remove-task"
                             onClick={() => setGapTasks(gapTasks.filter((_, i) => i !== index))}
+                            disabled={gapIsBreak}
                           >
                             ×
                           </button>
@@ -2861,12 +2942,14 @@ function TimeClock() {
                               setGapTasks(newTasks);
                             }}
                             placeholder={index === 0 ? "Enter task..." : "Another task..."}
+                            disabled={gapIsBreak}
                           />
                           {gapTasks.length > 1 && (
                             <button
                               type="button"
                               className="btn-remove-task"
                               onClick={() => setGapTasks(gapTasks.filter((_, i) => i !== index))}
+                              disabled={gapIsBreak}
                             >
                               −
                             </button>
@@ -2880,6 +2963,7 @@ function TimeClock() {
                   type="button"
                   className="btn-add-task"
                   onClick={() => setGapTasks([...gapTasks, ''])}
+                  disabled={gapIsBreak}
                 >
                   + Add Task
                 </button>
@@ -2897,7 +2981,7 @@ function TimeClock() {
                   setGapPresetDetail('');
                 }}
                 disabled={
-                  !gapTasks.some(t => t.trim()) ||
+                  (!gapIsBreak && !gapTasks.some(t => t.trim())) ||
                   !gapData?.startTime ||
                   !gapData?.endTime ||
                   !isEndTimeValidForStart(gapData?.startTime, gapData?.endTime)
@@ -4375,6 +4459,9 @@ function TimeClock() {
                     if (hasGaps()) {
                       setToast({ type: 'error', message: 'Please fill in the gaps between your time blocks before clocking out.' });
                       setTimeout(() => setToast(null), 4000);
+                      // Trigger attention animation on gap widget
+                      setGapAttentionPulse(true);
+                      setTimeout(() => setGapAttentionPulse(false), 600);
                       return;
                     }
                     previewShift();
@@ -4401,10 +4488,6 @@ function TimeClock() {
                   const workBlockNumber = completedBlocks
                     .slice(0, index + 1)
                     .filter(b => !b.isBreak).length;
-
-                  // Gap animation classes - only valid between blocks (not after the last one)
-                  const isBeforeGap = gapAnimatingIndex !== null && index === gapAnimatingIndex - 1 && index < completedBlocks.length - 1;
-                  const isAfterGap = gapAnimatingIndex !== null && index === gapAnimatingIndex && gapAnimatingIndex < completedBlocks.length;
 
                   // Slide-out animation classes
                   const isSlidingOut = slidingOutBlockId === block.id;
@@ -4437,10 +4520,27 @@ function TimeClock() {
                     );
                   }
 
+                  // Gap widget placeholder - replaces deleted block in place, no movement
+                  if (block.isGapWidgetPlaceholder) {
+                    return (
+                      <div key={block.id} className={`gap-widget-inline ${gapAttentionPulse ? 'attention-pulse' : ''}`}>
+                        <button
+                          type="button"
+                          className="gap-fill-button"
+                          onClick={handleGapPlusClick}
+                          title={`Fill gap: ${formatTime(block.gapStartTime)} - ${formatTime(block.gapEndTime)}`}
+                        >
+                          <span className="gap-fill-plus">+</span>
+                          <span className="gap-fill-time">{formatTime(block.gapStartTime)} - {formatTime(block.gapEndTime)}</span>
+                        </button>
+                      </div>
+                    );
+                  }
+
                   return (
                   <React.Fragment key={block.id}>
                     <div
-                      className={`completed-block ${block.isBreak ? 'break-block' : ''} ${isBeforeGap ? 'gap-shrink' : ''} ${isAfterGap ? 'gap-expand' : ''} ${isSlidingOut ? 'sliding-out' : ''} ${isDeleting ? 'deleting' : ''} ${isNewlyAdded ? 'swipe-in' : ''}`}
+                      className={`completed-block ${block.isBreak ? 'break-block' : ''} ${isSlidingOut ? 'sliding-out' : ''} ${isDeleting ? 'deleting' : ''} ${isNewlyAdded ? 'swipe-in' : ''}`}
                     >
                       <div className="completed-block-row">
                         <span className="completed-number">
@@ -4487,20 +4587,6 @@ function TimeClock() {
                         ))}
                       </div>
                     </div>
-                    {/* Show + button in gap after this block - only between blocks, never after the last one */}
-                    {isBeforeGap && gapData && !showGapModal && !editingBlock && index < completedBlocks.length - 1 && gapData.startTime && gapData.endTime && (
-                      <div className="gap-fill-button-container">
-                        <button
-                          type="button"
-                          className="gap-fill-button"
-                          onClick={handleGapPlusClick}
-                          title={`Fill gap: ${formatTime(gapData.gapBoundaryStart || gapData.startTime)} - ${formatTime(gapData.gapBoundaryEnd || gapData.endTime)}`}
-                        >
-                          <span className="gap-fill-plus">+</span>
-                          <span className="gap-fill-time">{formatTime(gapData.gapBoundaryStart || gapData.startTime)} - {formatTime(gapData.gapBoundaryEnd || gapData.endTime)}</span>
-                        </button>
-                      </div>
-                    )}
                   </React.Fragment>
                   );
                 })}

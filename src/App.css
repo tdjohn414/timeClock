@@ -963,6 +963,11 @@ html, body {
   overflow-y: auto;
 }
 
+/* Smooth repositioning for all list items */
+.completed-list > * {
+  transition: margin 0.25s ease-out;
+}
+
 /* Swipe In Animation for completed blocks */
 @keyframes swipeIn {
   0% {
@@ -1176,6 +1181,54 @@ html, body {
   padding: 2px 8px;
   border-radius: 4px;
   margin-left: auto;
+}
+
+/* Inline gap widget - replaces deleted block smoothly in place */
+.gap-widget-inline {
+  animation: fadeInGapWidget 0.25s ease-out forwards;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.gap-widget-inline .gap-fill-button {
+  width: 100%;
+  min-height: 50px;
+}
+
+/* Attention pulse animation for gap widget */
+.gap-widget-inline.attention-pulse {
+  animation: gapAttentionPulse 0.5s ease-out;
+}
+
+@keyframes gapAttentionPulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.4);
+  }
+  25% {
+    transform: scale(1.03);
+    box-shadow: 0 0 0 8px rgba(231, 76, 60, 0.2);
+  }
+  50% {
+    transform: scale(0.98);
+    box-shadow: 0 0 0 4px rgba(231, 76, 60, 0.1);
+  }
+  75% {
+    transform: scale(1.01);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(231, 76, 60, 0);
+  }
+}
+
+@keyframes fadeInGapWidget {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
 }
 
 /* Compact mode for 10+ blocks */
@@ -2179,6 +2232,37 @@ html, body {
 
 .gap-duration strong {
   color: #27ae60;
+}
+
+/* Gap Break Option */
+.gap-break-option {
+  margin: 15px 0;
+  padding: 12px 15px;
+  background: #fef9e7;
+  border: 1px solid #f39c12;
+  border-radius: 8px;
+}
+
+.break-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-weight: 500;
+  color: #b7791f;
+}
+
+.break-checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #f39c12;
+  cursor: pointer;
+}
+
+/* Disabled section when break is selected */
+.disabled-section {
+  opacity: 0.4;
+  pointer-events: none;
 }
 
 /* Gap Modal Full UI */
