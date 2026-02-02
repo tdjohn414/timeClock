@@ -143,6 +143,18 @@ export const shiftsAPI = {
     return Array.isArray(shifts) ? shifts.map(transformShift) : [];
   },
 
+  // Get shifts grouped by pay week (uses Arizona time for week categorization)
+  getByWeek: async (params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    const data = await request(`/shifts/by-week${queryString ? `?${queryString}` : ''}`);
+    return {
+      payWeeks: (data.payWeeks || []).map(week => ({
+        ...week,
+        shifts: week.shifts.map(transformShift)
+      }))
+    };
+  },
+
   getOne: async (id) => {
     const shift = await request(`/shifts/${id}`);
     return transformShift(shift);

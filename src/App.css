@@ -372,6 +372,7 @@ html, body {
   align-items: center;
   margin-bottom: 15px;
   gap: 12px;
+  min-height: 28px;
 }
 
 .block-number {
@@ -481,7 +482,7 @@ html, body {
   font-family: 'Inter', sans-serif;
   font-weight: 500;
   color: #2c3e50;
-  transition: all 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .time-input-group input:focus {
@@ -529,7 +530,7 @@ html, body {
   color: #2c3e50;
   background: white;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s;
   -webkit-appearance: none;
   appearance: none;
   text-align: center;
@@ -1465,6 +1466,91 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* Week-grouped history styles */
+.history-weeks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.history-week-group {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.history-week-group .week-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  color: white !important;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+  border-bottom: none !important;
+}
+
+.history-week-group .week-header:hover {
+  opacity: 0.95;
+}
+
+.history-week-group .week-header .expand-icon {
+  font-size: 0.75rem;
+  opacity: 0.9;
+  color: white;
+}
+
+.history-week-group .week-header .week-display {
+  flex: 1;
+  font-size: 1rem;
+  color: white;
+}
+
+.history-week-group .week-header .week-hours {
+  font-size: 0.9rem;
+  opacity: 0.95;
+  font-weight: 600;
+  color: white;
+}
+
+.history-week-group .week-header .week-shift-count {
+  font-size: 0.8rem;
+  opacity: 0.8;
+  background: rgba(255, 255, 255, 0.2);
+  padding: 2px 8px;
+  border-radius: 10px;
+  color: white;
+}
+
+.week-shifts {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #fafbfc;
+}
+
+.week-shifts .history-item {
+  margin: 0;
+}
+
+/* Info icon for AZ time */
+.info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(102, 126, 234, 0.1);
+  color: #667eea;
+  font-size: 0.7rem;
+  font-style: normal;
 }
 
 .history-item {
@@ -6244,4 +6330,114 @@ html, body {
   width: 18px;
   height: 18px;
   cursor: pointer;
+}
+
+/* ============================================
+   USER SHIFT HISTORY - WEEK GROUPING STYLES
+   (Must be at end to override admin styles)
+   ============================================ */
+.history-tab .history-week-group .week-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, #475569 0%, #334155 100%) !important;
+  color: white !important;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+  border-bottom: none !important;
+  justify-content: flex-start;
+}
+
+.history-tab .history-week-group .week-header:hover {
+  opacity: 0.92;
+}
+
+.history-tab .history-week-group .week-header .expand-icon {
+  font-size: 0.8rem;
+  color: white !important;
+  min-width: 16px;
+}
+
+.history-tab .history-week-group .week-header .week-display {
+  flex: 1;
+  font-size: 1rem;
+  color: white !important;
+  font-weight: 600;
+}
+
+.history-tab .history-week-group .week-header .week-hours {
+  font-size: 0.95rem;
+  color: white !important;
+  font-weight: 600;
+}
+
+.history-tab .history-week-group .week-header .week-shift-count {
+  font-size: 0.8rem;
+  background: rgba(255, 255, 255, 0.2) !important;
+  padding: 3px 10px;
+  border-radius: 12px;
+  color: white !important;
+  border: none !important;
+}
+
+/* Info Tooltip for AZ Time */
+.info-tooltip-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+}
+
+.info-icon-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  font-size: 0.85rem;
+  color: #64748b;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.info-icon-trigger:hover {
+  color: #3b82f6;
+}
+
+.info-tooltip {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  margin-top: 8px;
+  padding: 10px 14px;
+  background: #1e293b;
+  color: white;
+  font-size: 0.8rem;
+  font-weight: 400;
+  line-height: 1.4;
+  border-radius: 8px;
+  white-space: normal;
+  width: max-content;
+  max-width: 280px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s, visibility 0.2s;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.info-tooltip::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 12px;
+  border: 6px solid transparent;
+  border-bottom-color: #1e293b;
+}
+
+.info-tooltip-wrapper:hover .info-tooltip {
+  opacity: 1;
+  visibility: visible;
 }

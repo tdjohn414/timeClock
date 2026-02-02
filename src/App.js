@@ -168,6 +168,11 @@ function TimeClock() {
     return `${year}-${month}-${day}`;
   });
   const [shifts, setShifts] = useState([]);
+  const [myPayWeeks, setMyPayWeeks] = useState([]); // Current user's shifts grouped by pay week
+  const [myPayWeeksLoading, setMyPayWeeksLoading] = useState(false);
+  const [myPayWeeksOffset, setMyPayWeeksOffset] = useState(0); // For infinite scroll pagination
+  const [myPayWeeksHasMore, setMyPayWeeksHasMore] = useState(true);
+  const [expandedMyWeeks, setExpandedMyWeeks] = useState(new Set()); // Track which weeks are expanded in history
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null); // { shift, message }
@@ -267,6 +272,52 @@ function TimeClock() {
     };
     loadShifts();
   }, []);
+
+  // Load current user's shifts grouped by pay week (Arizona time) with infinite scroll
+  const loadMyPayWeeks = async (reset = false) => {
+    if (myPayWeeksLoading) return;
+
+    setMyPayWeeksLoading(true);
+    try {
+      const currentOffset = reset ? 0 : myPayWeeksOffset;
+      const weeksToLoad = currentOffset === 0 ? 3 : 2; // 3 initial, 2 per subsequent load
+
+      const data = await shiftsAPI.getByWeek({
+        limit: weeksToLoad,
+        offset: currentOffset
+      });
+
+      const newWeeks = data.payWeeks || [];
+
+      if (reset) {
+        setMyPayWeeks(newWeeks);
+        // Expand ALL weeks by default
+        setExpandedMyWeeks(new Set(newWeeks.map(w => w.weekStart)));
+      } else {
+        setMyPayWeeks(prev => [...prev, ...newWeeks]);
+        // Also expand newly loaded weeks
+        setExpandedMyWeeks(prev => {
+          const updated = new Set(prev);
+          newWeeks.forEach(w => updated.add(w.weekStart));
+          return updated;
+        });
+      }
+
+      setMyPayWeeksOffset(currentOffset + newWeeks.length);
+      setMyPayWeeksHasMore(newWeeks.length === weeksToLoad); // If we got fewer than requested, no more
+    } catch (err) {
+      console.error('Failed to load pay weeks:', err);
+    } finally {
+      setMyPayWeeksLoading(false);
+    }
+  };
+
+  // Load pay weeks when history tab is selected
+  useEffect(() => {
+    if (activeTab === 'history' && myPayWeeks.length === 0) {
+      loadMyPayWeeks(true);
+    }
+  }, [activeTab]);
 
   // Set default tab to admin for admin users
   useEffect(() => {
@@ -962,9 +1013,14 @@ function TimeClock() {
         timeBlocks: employeeEditingShift.timeBlocks || []
       });
       setEmployeeEditingShift(null);
-      // Reload shifts
+      // Reload shifts and pay weeks
       const updatedShifts = await shiftsAPI.getAll();
       setShifts(updatedShifts);
+      // Refresh pay weeks if on history tab
+      if (activeTab === 'history') {
+        setMyPayWeeksOffset(0);
+        loadMyPayWeeks(true);
+      }
       alert('Shift updated and resubmitted for approval');
     } catch (err) {
       alert(err.message || 'Failed to update shift');
@@ -1577,18 +1633,29 @@ function TimeClock() {
         setNewlyAddedBlockId(savedBlock.id);
         setTimeout(() => setNewlyAddedBlockId(null), 300);
 
-        // There's a gap - animate the gap opening and show + button (no modal yet)
-        setCompletedBlocks(result.blocks);
-        setGapAnimatingIndex(result.gap.gapIndex);
+        // Create a gap widget placeholder and insert it at the gap position
+        const gapPlaceholder = {
+          id: `gap-${Date.now()}`,
+          isGapWidgetPlaceholder: true,
+          gapStartTime: result.gap.startTime,
+          gapEndTime: result.gap.endTime
+        };
+
+        // Insert the gap placeholder at the gap index
+        const blocksWithGap = [...result.blocks];
+        blocksWithGap.splice(result.gap.gapIndex, 0, gapPlaceholder);
+
+        setCompletedBlocks(blocksWithGap);
+        setDeleteGapSource('edit');
 
         // Prepare gap data for the + button
         setGapData({
           ...result.gap,
-          pendingBlocks: result.blocks
+          pendingBlocks: result.blocks, // Blocks without the placeholder
+          placeholderId: gapPlaceholder.id
         });
         setGapTasks(['']);
         setGapIsBreak(false);
-        // Don't auto-show modal - user will click + button
       } else {
         // Track which block should animate in (the edited block returning)
         setNewlyAddedBlockId(savedBlock.id);
@@ -1704,12 +1771,9 @@ function TimeClock() {
   const handleCloseGapModal = () => {
     setShowGapModal(false);
 
-    // Validate that gap still exists (gapAnimatingIndex must be within bounds and have blocks on both sides)
-    const gapStillValid = gapAnimatingIndex !== null &&
-      gapAnimatingIndex > 0 &&
-      gapAnimatingIndex < completedBlocks.length &&
-      gapData?.gapBoundaryStart &&
-      gapData?.gapBoundaryEnd;
+    // Check if gap placeholder still exists in completedBlocks
+    const hasGapPlaceholder = completedBlocks.some(b => b.isGapWidgetPlaceholder);
+    const gapStillValid = hasGapPlaceholder && gapData?.gapBoundaryStart && gapData?.gapBoundaryEnd;
 
     if (gapStillValid && gapData) {
       // Reset times to original boundaries so the gap display stays correct
@@ -1719,12 +1783,12 @@ function TimeClock() {
         endTime: gapData.gapBoundaryEnd
       });
       setGapTasks(['']);
-        setGapIsBreak(false);
+      setGapIsBreak(false);
     } else {
       // Gap is no longer valid, clear everything
       setGapData(null);
       setGapTasks(['']);
-        setGapIsBreak(false);
+      setGapIsBreak(false);
       setGapAnimatingIndex(null);
       setBlocksBeforeEdit(null);
       setDeleteGapSource(null);
@@ -1915,6 +1979,18 @@ function TimeClock() {
 
         // No gap placeholder or still have blocks after it - just remove the block
         setCompletedBlocks(blocksAfterDelete);
+
+        // Update current block start time based on remaining blocks
+        const realBlocksForStart = blocksAfterDelete.filter(b => !b.isGapWidgetPlaceholder);
+        if (realBlocksForStart.length > 0) {
+          const lastRealBlock = realBlocksForStart[realBlocksForStart.length - 1];
+          setCurrentBlock(prev => ({ ...prev, startTime: lastRealBlock.endTime }));
+        } else {
+          // No blocks remain - current block start time should be editable (reset to current time or empty)
+          const now = new Date();
+          const currentTime = formatTime(now);
+          setCurrentBlock(prev => ({ ...prev, startTime: currentTime }));
+        }
 
         // Check if existing gap is now invalid (user deleted blocks that defined the gap)
         if (gapData) {
@@ -3998,19 +4074,33 @@ function TimeClock() {
               {currentBlock ? (
                 <div className={`time-block current-block ${currentBlock.isBreak ? 'break-block' : ''} ${swipingBlockId === currentBlock.id ? 'swiping-out' : ''}`}>
                   <div className="block-header">
-                    <span className="block-number">Block {blockCount}</span>
+                    <span className="block-number">
+                      Block {blockCount}
+                      <span className="info-tooltip-wrapper" style={{ marginLeft: '6px' }}>
+                        <span className="info-icon-trigger" style={{ fontSize: '0.75rem' }}>ⓘ</span>
+                        <span className="info-tooltip">Each block is limited to 2 hours max. Complete this block to start a new one.</span>
+                      </span>
+                    </span>
                     {calculateBlockHours(currentBlock.startTime, currentBlock.endTime) && (
                       <span className="block-hours">
                         {calculateBlockHours(currentBlock.startTime, currentBlock.endTime)} hrs
                       </span>
                     )}
-                    {(currentBlock.startTime || currentBlock.endTime) && completedBlocks.length === 0 && (
+                    {currentBlock.endTime && (
                       <button
                         type="button"
                         className="btn-clear-block"
-                        onClick={() => setCurrentBlock({ ...currentBlock, startTime: '', endTime: '' })}
+                        onClick={() => {
+                          // If there are completed blocks, start time is locked - only clear end time
+                          // If no completed blocks, clear both
+                          if (completedBlocks.length > 0) {
+                            setCurrentBlock({ ...currentBlock, endTime: '' });
+                          } else {
+                            setCurrentBlock({ ...currentBlock, startTime: '', endTime: '' });
+                          }
+                        }}
                       >
-                        Clear Times
+                        Clear
                       </button>
                     )}
                   </div>
@@ -4599,105 +4689,169 @@ function TimeClock() {
           </section>
         </main>
       ) : activeTab === 'history' ? (
-        /* Shift History Tab */
+        /* Shift History Tab - Grouped by Pay Week (Arizona Time) */
         <main className="history-tab">
           <section className="shift-history-full">
-            <h2>Shift History</h2>
-            {loading ? (
+            <h2>
+              Shift History
+              <span className="info-tooltip-wrapper">
+                <span className="info-icon-trigger">ⓘ</span>
+                <span className="info-tooltip">Pay weeks are grouped by Arizona time (UTC-7) for consistency across all employees</span>
+              </span>
+            </h2>
+            {myPayWeeksLoading ? (
               <p className="loading-text">Loading shifts...</p>
-            ) : shifts.length === 0 ? (
+            ) : myPayWeeks.length === 0 ? (
               <p className="empty-text">No shifts recorded yet</p>
             ) : (
-              <div className="history-list">
-                {shifts.map((shift) => {
-                  const shiftId = shift._id || shift.id;
-                  const isExpanded = expandedShifts.has(shiftId);
-                  const isInProgress = shift.status === 'in_progress' || shift.status === 'pending';
-                  const statusDisplay = {
-                    'in_progress': { label: 'In Progress', class: 'in-progress' },
-                    'pending': { label: 'In Progress', class: 'in-progress' },
-                    'pending_approval': { label: 'Pending Approval', class: 'pending-approval' },
-                    'rejected': { label: 'Rejected', class: 'rejected' },
-                    'approved': { label: 'Approved', class: 'approved' },
-                    'paid': { label: 'Paid', class: 'paid' },
-                    'completed': { label: 'Completed', class: 'approved' }
-                  }[shift.status] || { label: shift.status, class: shift.status };
+              <div className="history-weeks-list">
+                {myPayWeeks.map((week) => {
+                  const isWeekExpanded = expandedMyWeeks.has(week.weekStart);
                   return (
-                    <div key={shiftId} className={`history-item ${isExpanded ? 'expanded' : ''} ${isInProgress ? 'pending-shift' : ''}`}>
-                      <div className="history-header">
-                        <div
-                          className="history-header-left"
-                          onClick={() => toggleShiftExpanded(shiftId)}
-                        >
-                          <span className="expand-icon">{isExpanded ? '▼' : '▶'}</span>
-                          <span className={`status-badge ${statusDisplay.class}`}>{statusDisplay.label}</span>
-                          <span className="history-date">{formatDate(shift.date)}</span>
-                          <span className="history-times-inline">
-                            {formatTime(shift.clockInTime)} - {isInProgress ? 'Active' : formatTime(shift.clockOutTime)}
-                          </span>
-                        </div>
-                        <div className="history-header-right">
-                          <span className="history-hours">{isInProgress ? '--' : shift.totalHours} hrs</span>
-                          {/* Edit button for pending_approval or rejected shifts */}
-                          {(shift.status === 'pending_approval' || shift.status === 'rejected') && (
-                            <button
-                              type="button"
-                              className="btn-edit-shift"
-                              title="Edit and resubmit"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEmployeeEditingShift({
-                                  id: shiftId,
-                                  date: shift.date,
-                                  clockInTime: shift.clockInTime,
-                                  clockOutTime: shift.clockOutTime,
-                                  totalHours: shift.totalHours,
-                                  timeBlocks: shift.timeBlocks || [],
-                                  status: shift.status
-                                });
-                              }}
-                            >
-                              ✏️
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            className="btn-delete-shift"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (window.confirm('Delete this shift?')) {
-                                shiftsAPI.delete(shiftId).then(() => {
-                                  setShifts(shifts.filter(s => (s._id || s.id) !== shiftId));
-                                }).catch(err => alert('Failed to delete: ' + err.message));
-                              }
-                            }}
-                          >
-                            ×
-                          </button>
-                        </div>
+                    <div key={week.weekStart} className="history-week-group">
+                      <div
+                        className="week-header"
+                        onClick={() => {
+                          const newExpanded = new Set(expandedMyWeeks);
+                          if (isWeekExpanded) {
+                            newExpanded.delete(week.weekStart);
+                          } else {
+                            newExpanded.add(week.weekStart);
+                          }
+                          setExpandedMyWeeks(newExpanded);
+                        }}
+                      >
+                        <span className="expand-icon">{isWeekExpanded ? '▼' : '▶'}</span>
+                        <span className="week-display">{week.weekDisplay}</span>
+                        <span className="week-hours">{week.totalHours} hrs</span>
+                        <span className="week-shift-count">{week.shifts.length} shift{week.shifts.length !== 1 ? 's' : ''}</span>
                       </div>
-                      {isExpanded && shift.timeBlocks && shift.timeBlocks.length > 0 && (
-                        <div className="history-tasks">
-                          {shift.timeBlocks.map((block, i) => (
-                            <div key={i} className={`history-task ${block.isBreak ? 'break-task' : ''}`}>
-                              <span className="task-time">
-                                {formatTime(block.startTime)} - {formatTime(block.endTime)}
-                              </span>
-                              <span className="task-text">
-                                {block.tasks.split(' • ').map((task, j) => (
-                                  <span key={j} className="task-line-inline">{task}</span>
-                                ))}
-                              </span>
-                              {calculateBlockHours(block.startTime, block.endTime) && (
-                                <span className="task-hours">{calculateBlockHours(block.startTime, block.endTime)}h</span>
-                              )}
-                            </div>
-                          ))}
+                      {isWeekExpanded && (
+                        <div className="week-shifts">
+                          {week.shifts.map((shift) => {
+                            const shiftId = shift._id || shift.id;
+                            const isShiftExpanded = expandedShifts.has(shiftId);
+                            const isInProgress = shift.status === 'in_progress' || shift.status === 'pending';
+                            const statusDisplay = {
+                              'in_progress': { label: 'In Progress', class: 'in-progress' },
+                              'pending': { label: 'In Progress', class: 'in-progress' },
+                              'pending_approval': { label: 'Pending', class: 'pending-approval' },
+                              'rejected': { label: 'Rejected', class: 'rejected' },
+                              'approved': { label: 'Approved', class: 'approved' },
+                              'paid': { label: 'Paid', class: 'paid' },
+                              'completed': { label: 'Completed', class: 'approved' }
+                            }[shift.status] || { label: shift.status, class: shift.status };
+                            return (
+                              <div key={shiftId} className={`history-item ${isShiftExpanded ? 'expanded' : ''} ${isInProgress ? 'pending-shift' : ''}`}>
+                                <div className="history-header">
+                                  <div
+                                    className="history-header-left"
+                                    onClick={() => toggleShiftExpanded(shiftId)}
+                                  >
+                                    <span className="expand-icon">{isShiftExpanded ? '▼' : '▶'}</span>
+                                    <span className={`status-badge ${statusDisplay.class}`}>{statusDisplay.label}</span>
+                                    <span className="history-date">{formatDate(shift.date)}</span>
+                                    <span className="history-times-inline">
+                                      {formatTime(shift.clockInTime)} - {isInProgress ? 'Active' : formatTime(shift.clockOutTime)}
+                                    </span>
+                                  </div>
+                                  <div className="history-header-right">
+                                    {(shift.status === 'pending_approval' || shift.status === 'rejected') && (
+                                      <button
+                                        type="button"
+                                        className="btn-edit-shift"
+                                        title="Edit and resubmit"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setEmployeeEditingShift({
+                                            id: shiftId,
+                                            date: shift.date,
+                                            clockInTime: shift.clockInTime,
+                                            clockOutTime: shift.clockOutTime,
+                                            totalHours: shift.totalHours,
+                                            timeBlocks: shift.timeBlocks || [],
+                                            status: shift.status
+                                          });
+                                        }}
+                                      >
+                                        ✏️
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      className="btn-delete-shift"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (window.confirm('Delete this shift?')) {
+                                          shiftsAPI.delete(shiftId).then(() => {
+                                            // Refresh pay weeks after deletion (reset to reload all)
+                                            setMyPayWeeksOffset(0);
+                                            loadMyPayWeeks(true);
+                                          }).catch(err => alert('Failed to delete: ' + err.message));
+                                        }
+                                      }}
+                                    >
+                                      ×
+                                    </button>
+                                    <span className="history-hours">{isInProgress ? '--' : shift.totalHours} hrs</span>
+                                  </div>
+                                </div>
+                                {isShiftExpanded && shift.timeBlocks && shift.timeBlocks.length > 0 && (
+                                  <div className="history-tasks">
+                                    {shift.timeBlocks.map((block, i) => (
+                                      <div key={i} className={`history-task ${block.isBreak ? 'break-task' : ''}`}>
+                                        <span className="task-time">
+                                          {formatTime(block.startTime)} - {formatTime(block.endTime)}
+                                        </span>
+                                        <span className="task-text">
+                                          {block.tasks.split(' • ').map((task, j) => (
+                                            <span key={j} className="task-line-inline">{task}</span>
+                                          ))}
+                                        </span>
+                                        {calculateBlockHours(block.startTime, block.endTime) && (
+                                          <span className="task-hours">{calculateBlockHours(block.startTime, block.endTime)}h</span>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
                   );
                 })}
+                {/* Infinite Scroll Sentinel */}
+                {myPayWeeksHasMore ? (
+                  <div
+                    className="infinite-scroll-sentinel"
+                    ref={el => {
+                      if (el && !myPayWeeksLoading) {
+                        const observer = new IntersectionObserver(
+                          (entries) => {
+                            if (entries[0].isIntersecting && myPayWeeksHasMore && !myPayWeeksLoading) {
+                              loadMyPayWeeks(false);
+                            }
+                          },
+                          { threshold: 0.1 }
+                        );
+                        observer.observe(el);
+                        return () => observer.disconnect();
+                      }
+                    }}
+                    style={{ padding: '20px', textAlign: 'center' }}
+                  >
+                    {myPayWeeksLoading && (
+                      <span style={{ color: '#64748b', fontSize: '0.9rem' }}>Loading more weeks...</span>
+                    )}
+                  </div>
+                ) : myPayWeeks.length > 0 && (
+                  <div style={{ padding: '20px', textAlign: 'center', color: '#64748b', fontSize: '0.9rem' }}>
+                    No more shifts to load
+                  </div>
+                )}
               </div>
             )}
           </section>
