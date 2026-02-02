@@ -3099,6 +3099,31 @@ html, body {
   font-weight: 600;
 }
 
+/* Hours Breakdown Display */
+.top-employee .hours-breakdown {
+  font-weight: 600;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.top-employee .hours-approved {
+  color: #27ae60;
+}
+
+.top-employee .hours-plus,
+.top-employee .hours-equals {
+  color: #94a3b8;
+  font-weight: 400;
+}
+
+.top-employee .hours-pending {
+  color: #f59e0b;
+}
+
+.top-employee .hours-total-pending {
+  color: #f59e0b;
+}
+
 /* Leaderboard Week Navigation */
 .leaderboard-section {
   overflow: hidden;
@@ -5231,7 +5256,7 @@ html, body {
 }
 
 .pending-shift-card {
-  background: white;
+  background: linear-gradient(45deg, #fffae0, transparent);
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 16px;
@@ -5281,8 +5306,8 @@ html, body {
 
 .pending-shift-times {
   text-align: center;
-  background: #f8fafc;
-  border-radius: 8px;
+  background: white;
+  border-radius: 19px;
   padding: 12px;
   margin-bottom: 12px;
 }

@@ -5701,13 +5701,32 @@ function TimeClock() {
                       </div>
                       {/* Leaderboard List with Slide Animation */}
                       <div className={`top-employees-list ${dashboardSlideDirection ? `slide-${dashboardSlideDirection}` : ''}`}>
-                        {(dashboardLeaderboard?.employees || dashboardData.topEmployees)?.slice(0, 5).map((emp, i) => (
-                          <div key={emp.userId || emp.id} className="top-employee" onClick={() => loadUserPayWeeks(emp.userId || emp.id)} style={{ cursor: 'pointer' }}>
-                            <span className="rank">#{i + 1}</span>
-                            <span className="name">{emp.userName || emp.name}</span>
-                            <span className="hours">{formatHours(emp.totalHours || emp.hours || 0)} hrs</span>
-                          </div>
-                        ))}
+                        {(dashboardLeaderboard?.employees || dashboardData.topEmployees)?.slice(0, 5).map((emp, i) => {
+                          const approved = emp.approvedHours || 0;
+                          const pending = emp.pendingHours || 0;
+                          const total = emp.totalHours || emp.hours || 0;
+                          const hasPending = pending > 0;
+
+                          return (
+                            <div key={emp.userId || emp.id} className="top-employee" onClick={() => loadUserPayWeeks(emp.userId || emp.id)} style={{ cursor: 'pointer' }}>
+                              <span className="rank">#{i + 1}</span>
+                              <span className="name">{emp.userName || emp.name}</span>
+                              <span className="hours-breakdown">
+                                {hasPending ? (
+                                  <>
+                                    <span className="hours-approved">{formatHours(approved)}</span>
+                                    <span className="hours-plus"> + </span>
+                                    <span className="hours-pending">{formatHours(pending)}</span>
+                                    <span className="hours-equals"> = </span>
+                                    <span className="hours-total-pending">{formatHours(total)} hrs</span>
+                                  </>
+                                ) : (
+                                  <span className="hours-approved">{formatHours(total)} hrs</span>
+                                )}
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
 
