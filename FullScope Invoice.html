@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<!-- saved from url=(0125)file:///Users/trevo/Library/Messages/Attachments/20/00/2423282B-75C4-4ECA-A3DE-383449CC9AAB/Invoice%20Template-v2%202025.html -->
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FullScope Invoice</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+            color: #333;
+        }
+        
+        .invoice-container {
+            max-width: 850px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            min-height: 90vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* Header Section */
+        .header {
+            background-color: #e8e8e8;
+            padding: 20px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        /* Logo Design */
+        .logo {
+            width: 50px;
+            height: 50px;
+            position: relative;
+        }
+        
+        .logo-outer-circle {
+            width: 50px;
+            height: 50px;
+            border: 3px solid #2c5282;
+            border-radius: 50%;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        
+        .logo-inner-circle {
+            width: 28px;
+            height: 28px;
+            border: 2px solid #2c5282;
+            border-radius: 50%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+        
+        .logo-vertical-line {
+            position: absolute;
+            width: 2px;
+            height: 100%;
+            background-color: #2c5282;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        
+        .logo-horizontal-line {
+            position: absolute;
+            height: 2px;
+            width: 100%;
+            background-color: #2c5282;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        
+        .logo-center-dot {
+            width: 8px;
+            height: 8px;
+            background-color: #e53e3e;
+            border-radius: 50%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+        }
+        
+        .company-name {
+            font-size: 26px;
+            color: #2c5282;
+            font-weight: 600;
+            line-height: 1;
+        }
+        
+        .company-subtitle {
+            font-size: 13px;
+            color: #6b7280;
+            letter-spacing: 2.5px;
+            margin-top: 2px;
+        }
+        
+        .invoice-title {
+            font-size: 32px;
+            color: #2c5282;
+            font-weight: 300;
+            letter-spacing: 2px;
+        }
+        
+        .divider {
+            height: 3px;
+            background-color: #2c5282;
+            margin: 0;
+        }
+        
+        .invoice-content {
+            padding: 30px;
+            flex: 1;
+        }
+        
+        .info-section {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+        }
+        
+        .from-section {
+            flex: 1;
+        }
+        
+        .from-section h3 {
+            color: #2c5282;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            letter-spacing: 0.5px;
+        }
+        
+        .from-section p {
+            color: #666;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        
+        .invoice-details {
+            flex: 1;
+            text-align: right;
+        }
+        
+        .detail-row {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            margin-bottom: 10px;
+            gap: 15px;
+        }
+        
+        .detail-label {
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+            min-width: 100px;
+            text-align: right;
+        }
+        
+        .detail-input {
+            width: 200px;
+            padding: 5px 8px;
+            border: none;
+            border-bottom: 1px solid #d1d5db;
+            font-size: 14px;
+            text-align: left;
+        }
+        
+        .bill-to-section {
+            margin: 30px 0;
+        }
+        
+        .bill-to-section h3 {
+            color: #2c5282;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            letter-spacing: 0.5px;
+        }
+        
+        .bill-to-container {
+            padding: 16px;
+            border: 1px solid #e5e7eb;
+            border-radius: 4px;
+            background-color: #fafafa;
+        }
+        
+        .bill-to-field {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .bill-to-field:last-child {
+            margin-bottom: 0;
+        }
+        
+        .bill-to-label {
+            font-weight: 600;
+            color: #555;
+            font-size: 13px;
+            min-width: 70px;
+        }
+        
+        .bill-to-input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 14px;
+            background-color: white;
+        }
+        
+        .bill-to-input:focus {
+            outline: 2px solid #2c5282;
+            border-color: #2c5282;
+        }
+        
+        .items-section {
+            margin: 30px 0;
+        }
+        
+        .items-header {
+            display: flex;
+            padding: 10px 0;
+            border-bottom: 2px solid #e5e7eb;
+        }
+        
+        .header-description {
+            flex: 1;
+            color: #9ca3af;
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .header-amount {
+            width: 150px;
+            text-align: right;
+            color: #9ca3af;
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .header-action {
+            width: 50px;
+        }
+        
+        .item-row {
+            display: flex;
+            padding: 15px 0;
+            border-bottom: 1px solid #f3f4f6;
+            align-items: center;
+        }
+        
+        .item-description {
+            flex: 1;
+            padding: 8px;
+            border: none;
+            font-size: 14px;
+            background: transparent;
+        }
+        
+        .item-description:focus {
+            outline: 1px solid #2c5282;
+            background-color: #f9fafb;
+        }
+        
+        .item-amount {
+            width: 150px;
+            padding: 8px;
+            border: none;
+            font-size: 14px;
+            text-align: right;
+            font-weight: 600;
+            background: transparent;
+        }
+        
+        .item-amount:focus {
+            outline: 1px solid #2c5282;
+            background-color: #f9fafb;
+        }
+        
+        .item-action {
+            width: 50px;
+            text-align: center;
+        }
+        
+        .btn-remove {
+            background-color: #ef4444;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .btn-remove:hover {
+            background-color: #dc2626;
+        }
+        
+        .add-item-btn {
+            margin-top: 15px;
+            background-color: #2c5282;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .add-item-btn:hover {
+            background-color: #1e3a5f;
+        }
+        
+        .totals-section {
+            margin-top: 30px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+        }
+        
+        .total-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+            gap: 30px;
+        }
+        
+        .total-label {
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .total-amount {
+            font-size: 16px;
+            font-weight: 600;
+            color: #2c5282;
+            min-width: 100px;
+            text-align: right;
+        }
+        
+        .balance-row {
+            display: flex;
+            align-items: center;
+            padding-top: 10px;
+            border-top: 2px solid #2c5282;
+            gap: 30px;
+        }
+        
+        .balance-label {
+            font-size: 16px;
+            font-weight: 600;
+            color: #2c5282;
+        }
+        
+        .balance-amount {
+            font-size: 18px;
+            font-weight: 700;
+            color: #2c5282;
+            min-width: 100px;
+            text-align: right;
+        }
+        
+        .payment-section {
+            margin: 20px 0;
+            padding: 10px 16px;
+            background-color: #f8fafb;
+            border: 1px solid #2c5282;
+            border-radius: 4px;
+        }
+        
+        .payment-info {
+            display: flex;
+            align-items: center;
+            gap: 25px;
+        }
+        
+        .payment-title {
+            color: #2c5282;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .payment-method {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+        }
+        
+        .payment-label {
+            font-weight: 600;
+            color: #555;
+        }
+        
+        .payment-value {
+            color: #2c5282;
+            font-weight: 700;
+            font-size: 14px;
+        }
+        
+        .thank-you {
+            text-align: center;
+            padding: 30px 30px 40px;
+            font-style: italic;
+            color: #2c5282;
+            font-size: 14px;
+            margin-top: auto;
+        }
+        
+        .action-buttons {
+            padding: 20px;
+            background-color: #f9fafb;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            border-top: 1px solid #e5e7eb;
+        }
+        
+        .btn-calculate {
+            background-color: #10b981;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 12px 24px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        
+        .btn-calculate:hover {
+            background-color: #059669;
+        }
+        
+        .btn-print {
+            background-color: #2c5282;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 12px 24px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        
+        .btn-print:hover {
+            background-color: #1e3a5f;
+        }
+        
+        @media print {
+            body {
+                background-color: white;
+                padding: 0;
+            }
+            
+            .invoice-container {
+                box-shadow: none;
+                max-width: 100%;
+                min-height: 100vh;
+                display: flex;
+                flex-direction: column;
+            }
+            
+            .header {
+                background-color: #e8e8e8 !important;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+            
+            .payment-section {
+                background-color: #f8fafb !important;
+                border: 1px solid #2c5282 !important;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+            
+            .footer-section {
+                background-color: #e8e8e8 !important;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+            
+            .thank-you {
+                background-color: #e8e8e8 !important;
+                margin-top: 0;
+                padding-bottom: 30px;
+            }
+            
+            .action-buttons {
+                display: none !important;
+            }
+            
+            .btn-remove {
+                display: none !important;
+            }
+            
+            .add-item-btn {
+                display: none !important;
+            }
+            
+            .item-action {
+                display: none !important;
+            }
+            
+            .header-action {
+                display: none !important;
+            }
+            
+            .bill-to-container {
+                padding: 16px;
+                border: 1px solid #e5e7eb !important;
+                background-color: #fafafa !important;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+            
+            .bill-to-input {
+                border: none !important;
+                background: transparent !important;
+                padding-left: 0 !important;
+            }
+            
+            .bill-to-label {
+                font-weight: 600;
+                color: #333 !important;
+            }
+            
+            input {
+                border: none !important;
+                outline: none !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="invoice-container">
+        <div class="header">
+            <div class="logo-section">
+                <div class="logo">
+                    <div class="logo-outer-circle"></div>
+                    <div class="logo-inner-circle"></div>
+                    <div class="logo-vertical-line"></div>
+                    <div class="logo-horizontal-line"></div>
+                    <div class="logo-center-dot"></div>
+                </div>
+                <div>
+                    <div class="company-name">FullScope</div>
+                    <div class="company-subtitle">ESTIMATING</div>
+                </div>
+            </div>
+            <div class="invoice-title">INVOICE</div>
+        </div>
+        
+        <div class="divider"></div>
+        
+        <div class="invoice-content">
+            <div class="info-section">
+                <div class="from-section">
+                    <h3>FROM</h3>
+                    <p>
+                        FullScope Estimating<br>
+                        2210 W Olla Circle<br>
+                        Mesa, AZ 85202<br>
+                        Phone: (602) 419-7990<br>
+                        Email: admin@fullscopeestimating.com
+                    </p>
+                </div>
+                <div class="invoice-details">
+                    <div class="detail-row">
+                        <span class="detail-label">Invoice #:</span>
+                        <input class="detail-input" type="text" id="invoiceNumber" placeholder="Enter invoice number">
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Date:</span>
+                        <input class="detail-input" type="text" id="invoiceDate" placeholder="MM/DD/YYYY">
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Job Name:</span>
+                        <input class="detail-input" type="text" id="jobName" placeholder="Enter job name">
+                    </div>
+                </div>
+            </div>
+            
+            <div class="bill-to-section">
+                <h3>BILL TO</h3>
+                <div class="bill-to-container">
+                    <div class="bill-to-field">
+                        <label class="bill-to-label">Company:</label>
+                        <input class="bill-to-input" type="text" id="companyName" placeholder="Enter company name">
+                    </div>
+                    <div class="bill-to-field">
+                        <label class="bill-to-label">Contact:</label>
+                        <input class="bill-to-input" type="text" id="clientName" placeholder="Enter contact name">
+                    </div>
+                </div>
+            </div>
+            
+            <div class="payment-section">
+                <div class="payment-info">
+                    <span class="payment-title">PAYMENT INFORMATION:</span>
+                    <div class="payment-method">
+                        <span class="payment-label">Payment Method:</span>
+                        <span class="payment-value">Zelle</span>
+                    </div>
+                    <div class="payment-method">
+                        <span class="payment-label">Zelle Phone:</span>
+                        <span class="payment-value">(480) 776-4626</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="items-section">
+                <div class="items-header">
+                    <div class="header-description">DESCRIPTION</div>
+                    <div class="header-amount">AMOUNT</div>
+                    <div class="header-action"></div>
+                </div>
+                
+                <div id="lineItems">
+                    <div class="item-row" data-item-id="1">
+                        <input class="item-description" type="text" placeholder="Enter description">
+                        <input class="item-amount" type="text" placeholder="$0.00" onchange="updateTotals()">
+                        <div class="item-action">
+                            <button class="btn-remove" onclick="removeItem(this)" style="display: none;">✕</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <button class="add-item-btn" onclick="addLineItem()">+ Add Line Item</button>
+            </div>
+            
+            <div class="totals-section">
+                <div class="total-row">
+                    <span class="total-label">Subtotal:</span>
+                    <span class="total-amount" id="subtotal">$0.00</span>
+                </div>
+                <div class="balance-row">
+                    <span class="balance-label">BALANCE DUE:</span>
+                    <span class="balance-amount" id="balanceDue">$0.00</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer-section">
+            <div class="action-buttons">
+                <button class="btn-calculate" onclick="calculateTenPercent()">Calculate 10% Fee</button>
+                <button class="btn-print" onclick="window.print()">Download as PDF</button>
+            </div>
+            
+            <div class="thank-you">
+                Thank you for trusting FullScope Estimating with your supplement needs.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Set today's date
+        document.getElementById('invoiceDate').value = new Date().toLocaleDateString('en-US');
+        
+        let itemCounter = 1;
+        
+        function formatCurrency(amount) {
+            const number = parseFloat(amount) || 0;
+            return new Intl.NumberFormat('en-US', {
+                style: 'currency',
+                currency: 'USD'
+            }).format(number);
+        }
+        
+        function addLineItem() {
+            itemCounter++;
+            const itemsContainer = document.getElementById('lineItems');
+            const newItem = document.createElement('div');
+            newItem.className = 'item-row';
+            newItem.setAttribute('data-item-id', itemCounter);
+            newItem.innerHTML = `
+                <input class="item-description" type="text" placeholder="Enter description">
+                <input class="item-amount" type="text" placeholder="$0.00" onchange="updateTotals()">
+                <div class="item-action">
+                    <button class="btn-remove" onclick="removeItem(this)">✕</button>
+                </div>
+            `;
+            itemsContainer.appendChild(newItem);
+            updateRemoveButtons();
+        }
+        
+        function removeItem(button) {
+            const row = button.closest('.item-row');
+            row.remove();
+            updateRemoveButtons();
+            updateTotals();
+        }
+        
+        function updateRemoveButtons() {
+            const items = document.querySelectorAll('.item-row');
+            const removeButtons = document.querySelectorAll('.btn-remove');
+            
+            if (items.length > 1) {
+                removeButtons.forEach(btn => btn.style.display = 'inline-block');
+            } else {
+                removeButtons.forEach(btn => btn.style.display = 'none');
+            }
+        }
+        
+        function updateTotals() {
+            const amountInputs = document.querySelectorAll('.item-amount');
+            let total = 0;
+            
+            amountInputs.forEach(input => {
+                // Clean the value and format it
+                const cleanValue = input.value.replace(/[$,]/g, '');
+                const amount = parseFloat(cleanValue) || 0;
+                
+                if (amount > 0) {
+                    // Format with commas and dollar sign
+                    input.value = '$' + amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                }
+                
+                total += amount;
+            });
+            
+            document.getElementById('subtotal').textContent = formatCurrency(total);
+            document.getElementById('balanceDue').textContent = formatCurrency(total);
+        }
+        
+        function calculateTenPercent() {
+            const firstAmountInput = document.querySelector('.item-amount');
+            const firstDescInput = document.querySelector('.item-description');
+            
+            if (firstAmountInput && firstAmountInput.value) {
+                const cleanValue = firstAmountInput.value.replace(/[$,]/g, '');
+                const supplementAmount = parseFloat(cleanValue) || 0;
+                const fee = supplementAmount * 0.10;
+                
+                // Update first item description
+                firstDescInput.value = `Insurance supplement services - ${formatCurrency(supplementAmount)} approved increase`;
+                
+                // Clear all other items first
+                const allItems = document.querySelectorAll('.item-row');
+                for (let i = 1; i < allItems.length; i++) {
+                    allItems[i].remove();
+                }
+                
+                // Add the 10% fee line
+                itemCounter++;
+                const itemsContainer = document.getElementById('lineItems');
+                const newItem = document.createElement('div');
+                newItem.className = 'item-row';
+                newItem.setAttribute('data-item-id', itemCounter);
+                newItem.innerHTML = `
+                    <input class="item-description" type="text" value="10% of approved supplement increase">
+                    <input class="item-amount" type="text" value="$${fee.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}" onchange="updateTotals()">
+                    <div class="item-action">
+                        <button class="btn-remove" onclick="removeItem(this)">✕</button>
+                    </div>
+                `;
+                itemsContainer.appendChild(newItem);
+                
+                updateRemoveButtons();
+                updateTotals();
+            } else {
+                alert('Please enter a supplement amount first');
+            }
+        }
+        
+        // Add input listeners for amount fields
+        document.addEventListener('input', function(e) {
+            if (e.target.classList.contains('item-amount')) {
+                // Allow typing but don't format until they leave the field
+                // This prevents cursor jumping issues
+            }
+        });
+        
+        document.addEventListener('blur', function(e) {
+            if (e.target.classList.contains('item-amount')) {
+                updateTotals();
+            }
+        }, true);
+    </script>
+
+</body></html>

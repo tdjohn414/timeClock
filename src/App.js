@@ -2325,11 +2325,24 @@ function TimeClock() {
           previewShiftData.totalHours
         );
       } else {
-        // Fallback: create new shift (shouldn't happen with new flow)
-        completedShift = await shiftsAPI.create(previewShiftData);
+        // Fallback: create new shift (no pending shift exists)
+        // Need to convert times to UTC since we didn't go through clock-in flow
+        completedShift = await shiftsAPI.create({
+          ...previewShiftData,
+          clockInTime: localTimeToUTC(previewShiftData.clockInTime, previewShiftData.date),
+          clockOutTime: localTimeToUTC(previewShiftData.clockOutTime, previewShiftData.date),
+          timeBlocks: previewShiftData.timeBlocks.map(block => ({
+            ...block,
+            startTime: localTimeToUTC(block.startTime, previewShiftData.date),
+            endTime: localTimeToUTC(block.endTime, previewShiftData.date)
+          }))
+        });
       }
 
       setShifts([completedShift, ...shifts]);
+
+      // Reset pay weeks so history tab will reload fresh data
+      setMyPayWeeks([]);
 
       // Show toast with preview
       setToast({
@@ -2444,6 +2457,9 @@ function TimeClock() {
 
       // Add to shifts list
       setShifts([completedShift, ...shifts]);
+
+      // Reset pay weeks so history tab will reload fresh data
+      setMyPayWeeks([]);
 
       // Show toast
       setToast({
