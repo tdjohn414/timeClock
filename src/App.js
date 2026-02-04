@@ -2032,7 +2032,10 @@ function TimeClock() {
       // Block is in the middle - check if prev.endTime !== next.startTime
       const prevEndMinutes = timeToMinutes(prevBlock.endTime);
       const nextStartMinutes = timeToMinutes(nextBlock.startTime);
-      if (prevEndMinutes < nextStartMinutes) {
+      // Gap exists if times don't match - handles both forward gaps AND overnight gaps
+      // Forward: 10:00 vs 10:30 (prev < next)
+      // Overnight: 23:30 vs 00:30 (prev > next but still a gap!)
+      if (prevEndMinutes !== nextStartMinutes) {
         createsGap = true;
         gapStart = prevBlock.endTime;
         gapEnd = nextBlock.startTime;
@@ -2636,6 +2639,58 @@ function TimeClock() {
       return 'Invalid Date';
     }
   };
+
+  // Short date format for block display (e.g., "1/27")
+  const formatShortDate = (dateStr) => {
+    if (!dateStr) return '';
+    try {
+      const date = new Date(dateStr + 'T12:00:00');
+      if (isNaN(date.getTime())) return '';
+      return `${date.getMonth() + 1}/${date.getDate()}`;
+    } catch {
+      return '';
+    }
+  };
+
+  // Calculate the date for each block, accounting for overnight shifts
+  const getBlockDates = () => {
+    if (completedBlocks.length === 0 || !currentDate) return [];
+
+    const dates = [];
+    let blockDate = currentDate;
+    let crossedMidnight = false;
+
+    for (let i = 0; i < completedBlocks.length; i++) {
+      const block = completedBlocks[i];
+      if (block.isGapWidgetPlaceholder) {
+        dates.push(blockDate);
+        continue;
+      }
+
+      // Once we've crossed midnight, all subsequent blocks are on the next day
+      if (crossedMidnight) {
+        dates.push(blockDate);
+      } else {
+        dates.push(blockDate);
+
+        // Check if THIS block spans midnight (end time < start time in minutes)
+        // e.g., 23:30 (1410) to 00:30 (30) -> 30 < 1410 = spans midnight
+        const startMins = timeToMinutes(block.startTime);
+        const endMins = timeToMinutes(block.endTime);
+        if (endMins < startMins) {
+          // This block spans midnight, so next block is on the new date
+          crossedMidnight = true;
+          const d = new Date(blockDate + 'T12:00:00');
+          d.setDate(d.getDate() + 1);
+          blockDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
+      }
+    }
+
+    return dates;
+  };
+
+  const blockDates = getBlockDates();
 
   const blockCount = completedBlocks.length + (currentBlock ? 1 : 0);
 
@@ -3728,13 +3783,16 @@ function TimeClock() {
             <div className="section-header">
               <h2>Current Block</h2>
               <div className="date-picker">
-                <input
-                  type="date"
-                  value={currentDate}
-                  onChange={(e) => setCurrentDate(e.target.value)}
-                  disabled={completedBlocks.length > 0 || pendingShiftId !== null}
-                  title={completedBlocks.length > 0 || pendingShiftId ? "Date cannot be changed after starting a shift" : "Select date for this shift"}
-                />
+                {completedBlocks.length > 0 || pendingShiftId !== null ? (
+                  <span className="date-display-locked">{formatDate(currentDate)}</span>
+                ) : (
+                  <input
+                    type="date"
+                    value={currentDate}
+                    onChange={(e) => setCurrentDate(e.target.value)}
+                    title="Select date for this shift"
+                  />
+                )}
               </div>
             </div>
 
@@ -4762,6 +4820,7 @@ function TimeClock() {
                             {block.isBreak ? 'Break' : `#${workBlockNumber}`}
                           </span>
                           <span className="completed-time placeholder-fade">
+                            <span className="block-date">{formatShortDate(blockDates[index])}</span>
                             {formatTime(block.startTime)} - {formatTime(block.endTime)}
                           </span>
                           <span className="completed-hours placeholder-fade">
@@ -4805,6 +4864,7 @@ function TimeClock() {
                           {block.isBreak ? 'Break' : `#${workBlockNumber}`}
                         </span>
                         <span className="completed-time">
+                          <span className="block-date">{formatShortDate(blockDates[index])}</span>
                           {formatTime(block.startTime)} - {formatTime(block.endTime)}
                         </span>
                         <div className="completed-actions">
