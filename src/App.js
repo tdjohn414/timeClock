@@ -136,7 +136,6 @@ function TimeClock() {
   const [batchActionDropdown, setBatchActionDropdown] = useState(false);
   const [statusDropdownShiftId, setStatusDropdownShiftId] = useState(null);
   const [editingShift, setEditingShift] = useState(null);
-  const [employeeEditingShift, setEmployeeEditingShift] = useState(null);
   const [viewingShift, setViewingShift] = useState(null);
   const [viewingShiftLoading, setViewingShiftLoading] = useState(false);
   const [expandedTaskBlocks, setExpandedTaskBlocks] = useState(new Set());
@@ -1039,32 +1038,6 @@ function TimeClock() {
     }
   };
 
-  // Employee updating their own shift (pending_approval or rejected)
-  const handleEmployeeUpdateShift = async () => {
-    if (!employeeEditingShift) return;
-    try {
-      await shiftsAPI.update(employeeEditingShift.id, {
-        date: employeeEditingShift.date,
-        clockInTime: employeeEditingShift.clockInTime,
-        clockOutTime: employeeEditingShift.clockOutTime,
-        totalHours: employeeEditingShift.totalHours,
-        timeBlocks: employeeEditingShift.timeBlocks || []
-      });
-      setEmployeeEditingShift(null);
-      // Reload shifts and pay weeks
-      const updatedShifts = await shiftsAPI.getAll();
-      setShifts(updatedShifts);
-      // Refresh pay weeks if on history tab
-      if (activeTab === 'history') {
-        setMyPayWeeksOffset(0);
-        loadMyPayWeeks(true);
-      }
-      alert('Shift updated and resubmitted for approval');
-    } catch (err) {
-      alert(err.message || 'Failed to update shift');
-    }
-  };
-
   const handleDeleteShift = async (shiftId) => {
     if (deleteConfirmText !== 'DELETE') return;
     try {
@@ -1206,6 +1179,73 @@ function TimeClock() {
     setCurrentTasks(['']);
   };
 
+  // Track if we're editing an existing shift (vs creating a new one)
+  const [isEditingExistingShift, setIsEditingExistingShift] = useState(false);
+
+  // Load an existing shift into the main clock interface for editing
+  // This reuses the same validated UI instead of a separate modal
+  const handleEditShiftInline = (shift) => {
+    // Convert timeBlocks to the format expected by completedBlocks
+    const blocks = (shift.timeBlocks || []).map((block, idx) => ({
+      id: block.id || Date.now() + idx,
+      serverId: block.id, // Track server ID for updates
+      startTime: block.startTime?.substring(0, 5) || block.startTime,
+      endTime: block.endTime?.substring(0, 5) || block.endTime,
+      tasks: block.tasks || '',
+      isBreak: block.isBreak || false
+    }));
+
+    // Set the date to the shift's date
+    setCurrentDate(shift.date?.split('T')[0] || shift.date);
+
+    // Load all blocks as completed (user can swipe to edit any of them)
+    setCompletedBlocks(blocks);
+
+    // Set the pending shift ID so saves update this shift
+    setPendingShiftId(shift.id);
+
+    // Mark that we're editing an existing shift
+    setIsEditingExistingShift(true);
+
+    // Clear current block - user can add more if needed
+    setCurrentBlock(null);
+    setCurrentTasks(['']);
+
+    // Clear any editing state
+    setEditingBlock(null);
+    setEditingBlockOriginal(null);
+    setEditingTasks(['']);
+
+    // Switch to the today tab (where the shift entry UI is)
+    setActiveTab('today');
+
+    // Show a toast to indicate edit mode
+    setToast({ type: 'info', message: shift.status === 'rejected' ? 'Editing rejected shift - make corrections and clock out to resubmit' : 'Editing shift - make changes and clock out to save' });
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  // Cancel editing an existing shift (don't delete from server, just clear local state)
+  const handleCancelEditingShift = () => {
+    // Clear all local state without touching the server
+    setCurrentBlock(null);
+    setCompletedBlocks([]);
+    setCurrentTasks(['']);
+    setPendingShiftId(null);
+    setIsEditingExistingShift(false);
+    setEditingBlock(null);
+    setEditingBlockOriginal(null);
+    setEditingTasks(['']);
+    setPendingPreset(null);
+    setPresetDetail('');
+    setAutoSaveStatus('idle');
+
+    // Go back to history tab
+    setActiveTab('history');
+
+    setToast({ type: 'info', message: 'Edit cancelled' });
+    setTimeout(() => setToast(null), 3000);
+  };
+
   // Cancel shift and delete all time blocks
   const handleCancelShift = async () => {
     try {
@@ -1217,6 +1257,7 @@ function TimeClock() {
       setCompletedBlocks([]);
       setCurrentTasks(['']);
       setPendingShiftId(null);
+      setIsEditingExistingShift(false);
       setEditingBlock(null);
       setEditingBlockOriginal(null);
       setEditingTasks(['']);
@@ -1475,6 +1516,36 @@ function TimeClock() {
     return false;
   };
 
+  // Check if any blocks overlap - NEVER allowed
+  const hasOverlaps = () => {
+    const validBlocks = completedBlocks.filter(b => !b.isGapWidgetPlaceholder && !b.isEditingPlaceholder);
+    if (validBlocks.length < 2) return false;
+
+    for (let i = 0; i < validBlocks.length; i++) {
+      const blockA = validBlocks[i];
+      const [aStartH, aStartM] = blockA.startTime.split(':').map(Number);
+      const [aEndH, aEndM] = blockA.endTime.split(':').map(Number);
+      let aStart = aStartH * 60 + aStartM;
+      let aEnd = aEndH * 60 + aEndM;
+      if (aEnd <= aStart) aEnd += 24 * 60; // Handle overnight
+
+      for (let j = i + 1; j < validBlocks.length; j++) {
+        const blockB = validBlocks[j];
+        const [bStartH, bStartM] = blockB.startTime.split(':').map(Number);
+        const [bEndH, bEndM] = blockB.endTime.split(':').map(Number);
+        let bStart = bStartH * 60 + bStartM;
+        let bEnd = bEndH * 60 + bEndM;
+        if (bEnd <= bStart) bEnd += 24 * 60; // Handle overnight
+
+        // Check for overlap: blocks overlap if one starts before the other ends
+        if (aStart < bEnd && bStart < aEnd) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
   // Handle keyboard shortcuts for hour dropdowns
   // If user presses a digit, auto-select matching hour if unambiguous
   const handleHourKeyDown = (e, availableHours, onSelect) => {
@@ -1595,9 +1666,30 @@ function TimeClock() {
     let updatedBlocks = [...blocks];
     updatedBlocks.splice(insertIndex, 0, savedBlock);
 
+    const editedStartMinutes = timeToMinutes(savedBlock.startTime);
     const editedEndMinutes = timeToMinutes(savedBlock.endTime);
 
-    // Check if there's a next block
+    // Check if there's a PREVIOUS block - gap created by changing start time
+    if (insertIndex > 0) {
+      const prevBlock = updatedBlocks[insertIndex - 1];
+      const prevEndMinutes = timeToMinutes(prevBlock.endTime);
+
+      // Handle gap with previous block - edited start time is AFTER prev block's end
+      if (editedStartMinutes > prevEndMinutes) {
+        return {
+          blocks: updatedBlocks,
+          gap: {
+            startTime: prevBlock.endTime,
+            endTime: savedBlock.startTime,
+            gapBoundaryStart: prevBlock.endTime,
+            gapBoundaryEnd: savedBlock.startTime,
+            gapIndex: insertIndex
+          }
+        };
+      }
+    }
+
+    // Check if there's a NEXT block
     if (insertIndex + 1 < updatedBlocks.length) {
       const nextBlock = updatedBlocks[insertIndex + 1];
       const nextStartMinutes = timeToMinutes(nextBlock.startTime);
@@ -3458,7 +3550,7 @@ function TimeClock() {
                 setAdminSubTab('dashboard');
                 loadDashboard();
               } else {
-                setActiveTab('clock');
+                setActiveTab('today');
               }
             }}
           >
@@ -3640,6 +3732,8 @@ function TimeClock() {
                   type="date"
                   value={currentDate}
                   onChange={(e) => setCurrentDate(e.target.value)}
+                  disabled={completedBlocks.length > 0 || pendingShiftId !== null}
+                  title={completedBlocks.length > 0 || pendingShiftId ? "Date cannot be changed after starting a shift" : "Select date for this shift"}
                 />
               </div>
             </div>
@@ -3713,6 +3807,12 @@ function TimeClock() {
                                 const [nh, nm] = nextBlock.startTime.split(':').map(Number);
                                 maxStartMins = nh * 60 + nm - 15;
                               }
+                            }
+
+                            // If editing the LAST block (no next block), start time must equal prev block's end
+                            // This prevents creating any gaps - start time is locked
+                            if (maxStartMins === null && minStartMins !== null) {
+                              maxStartMins = minStartMins; // Only allow the exact previous end time
                             }
 
                             if (minStartMins === null && maxStartMins === null) return fallback;
@@ -4589,21 +4689,31 @@ function TimeClock() {
                     type="button"
                     className="btn-cancel-shift"
                     onClick={() => {
-                      // Skip confirmation if no blocks saved yet
-                      if (completedBlocks.length === 0) {
-                        handleCancelShift();
+                      if (isEditingExistingShift) {
+                        // Just cancel editing, don't delete anything from server
+                        handleCancelEditingShift();
                       } else {
-                        setShowCancelShiftConfirm(true);
+                        // Skip confirmation if no blocks saved yet
+                        if (completedBlocks.length === 0) {
+                          handleCancelShift();
+                        } else {
+                          setShowCancelShiftConfirm(true);
+                        }
                       }
                     }}
                   >
-                    Cancel Shift
+                    {isEditingExistingShift ? 'Cancel Edit' : 'Cancel Shift'}
                   </button>
                 )}
                 <button
                   type="button"
                   className={`btn-save ${hasGaps() ? 'has-gaps' : ''}`}
                   onClick={() => {
+                    if (hasOverlaps()) {
+                      setToast({ type: 'error', message: 'Time blocks cannot overlap. Please fix the overlapping blocks before clocking out.' });
+                      setTimeout(() => setToast(null), 4000);
+                      return;
+                    }
                     if (hasGaps()) {
                       setToast({ type: 'error', message: 'Please fill in the gaps between your time blocks before clocking out.' });
                       setTimeout(() => setToast(null), 4000);
@@ -4614,9 +4724,9 @@ function TimeClock() {
                     }
                     previewShift();
                   }}
-                  disabled={(completedBlocks.length === 0 && !currentBlock) || saving}
+                  disabled={(completedBlocks.length === 0 && !currentBlock) || saving || hasOverlaps()}
                 >
-                  {saving ? 'Saving...' : 'Clock Out'}
+                  {saving ? 'Saving...' : (hasOverlaps() ? 'Fix Overlaps' : 'Clock Out')}
                 </button>
               </div>
             </div>
@@ -4817,12 +4927,9 @@ function TimeClock() {
                                         title="Edit and resubmit"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          setEmployeeEditingShift({
+                                          handleEditShiftInline({
                                             id: shiftId,
                                             date: shift.date,
-                                            clockInTime: shift.clockInTime,
-                                            clockOutTime: shift.clockOutTime,
-                                            totalHours: shift.totalHours,
                                             timeBlocks: shift.timeBlocks || [],
                                             status: shift.status
                                           });
@@ -6895,154 +7002,7 @@ function TimeClock() {
         </main>
       )}
 
-      {/* Employee Edit Shift Modal */}
-      {employeeEditingShift && (
-        <div className="modal-overlay" onClick={() => setEmployeeEditingShift(null)}>
-          <div className="modal employee-edit-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Edit Shift</h2>
-              <button className="modal-close" onClick={() => setEmployeeEditingShift(null)}>&times;</button>
-            </div>
-            <div className="modal-body">
-              {employeeEditingShift.status === 'rejected' && (
-                <p className="info-text" style={{ color: '#dc2626', marginBottom: '16px' }}>
-                  This shift was rejected. Make your corrections and save to resubmit for approval.
-                </p>
-              )}
-              <div className="form-row">
-                <div className="form-field">
-                  <label>Date</label>
-                  <input
-                    type="date"
-                    value={employeeEditingShift.date?.split('T')[0] || employeeEditingShift.date || ''}
-                    onChange={e => setEmployeeEditingShift({...employeeEditingShift, date: e.target.value})}
-                  />
-                </div>
-                <div className="form-field">
-                  <label>Total Hours</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={employeeEditingShift.totalHours || ''}
-                    onChange={e => setEmployeeEditingShift({...employeeEditingShift, totalHours: e.target.value})}
-                  />
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-field">
-                  <label>Clock In</label>
-                  <input
-                    type="time"
-                    value={employeeEditingShift.clockInTime?.substring(0,5) || ''}
-                    onChange={e => setEmployeeEditingShift({...employeeEditingShift, clockInTime: e.target.value})}
-                  />
-                </div>
-                <div className="form-field">
-                  <label>Clock Out</label>
-                  <input
-                    type="time"
-                    value={employeeEditingShift.clockOutTime?.substring(0,5) || ''}
-                    onChange={e => setEmployeeEditingShift({...employeeEditingShift, clockOutTime: e.target.value})}
-                  />
-                </div>
-              </div>
-
-              {/* Time Blocks Section */}
-              <div className="time-blocks-section">
-                <div className="time-blocks-header">
-                  <h3>Time Blocks</h3>
-                  <button
-                    type="button"
-                    className="btn-add-block"
-                    onClick={() => {
-                      const newBlock = {
-                        id: Date.now(),
-                        startTime: employeeEditingShift.clockInTime?.substring(0,5) || '08:00',
-                        endTime: employeeEditingShift.clockOutTime?.substring(0,5) || '17:00',
-                        tasks: '',
-                        isBreak: false
-                      };
-                      setEmployeeEditingShift({
-                        ...employeeEditingShift,
-                        timeBlocks: [...(employeeEditingShift.timeBlocks || []), newBlock]
-                      });
-                    }}
-                  >
-                    + Add Block
-                  </button>
-                </div>
-                <div className="time-blocks-list">
-                  {(employeeEditingShift.timeBlocks || []).map((block, idx) => (
-                    <div key={block.id || idx} className={`time-block-item ${block.isBreak ? 'break-block' : ''}`}>
-                      <div className="block-row">
-                        <input
-                          type="time"
-                          value={block.startTime?.substring(0,5) || ''}
-                          onChange={e => {
-                            const updated = [...employeeEditingShift.timeBlocks];
-                            updated[idx] = { ...updated[idx], startTime: e.target.value };
-                            setEmployeeEditingShift({ ...employeeEditingShift, timeBlocks: updated });
-                          }}
-                        />
-                        <span className="block-separator">-</span>
-                        <input
-                          type="time"
-                          value={block.endTime?.substring(0,5) || ''}
-                          onChange={e => {
-                            const updated = [...employeeEditingShift.timeBlocks];
-                            updated[idx] = { ...updated[idx], endTime: e.target.value };
-                            setEmployeeEditingShift({ ...employeeEditingShift, timeBlocks: updated });
-                          }}
-                        />
-                        <label className="break-checkbox">
-                          <input
-                            type="checkbox"
-                            checked={block.isBreak || false}
-                            onChange={e => {
-                              const updated = [...employeeEditingShift.timeBlocks];
-                              updated[idx] = { ...updated[idx], isBreak: e.target.checked };
-                              setEmployeeEditingShift({ ...employeeEditingShift, timeBlocks: updated });
-                            }}
-                          />
-                          Break
-                        </label>
-                        <button
-                          type="button"
-                          className="btn-delete-block"
-                          onClick={() => {
-                            const updated = employeeEditingShift.timeBlocks.filter((_, i) => i !== idx);
-                            setEmployeeEditingShift({ ...employeeEditingShift, timeBlocks: updated });
-                          }}
-                        >
-                          ×
-                        </button>
-                      </div>
-                      <textarea
-                        placeholder="Tasks / notes for this time block..."
-                        value={block.tasks || ''}
-                        onChange={e => {
-                          const updated = [...employeeEditingShift.timeBlocks];
-                          updated[idx] = { ...updated[idx], tasks: e.target.value };
-                          setEmployeeEditingShift({ ...employeeEditingShift, timeBlocks: updated });
-                        }}
-                      />
-                    </div>
-                  ))}
-                  {(!employeeEditingShift.timeBlocks || employeeEditingShift.timeBlocks.length === 0) && (
-                    <p className="empty-text">No time blocks. Click "Add Block" to add tasks.</p>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-cancel-modal" onClick={() => setEmployeeEditingShift(null)}>Cancel</button>
-              <button className="btn-confirm-modal" onClick={handleEmployeeUpdateShift}>
-                Save & Resubmit
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Employee Edit Shift Modal - REMOVED: Now uses main clock interface via handleEditShiftInline */}
     </div>
   );
 }
