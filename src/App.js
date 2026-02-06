@@ -5483,7 +5483,11 @@ function TimeClock() {
                 </div>
                 <div className="modal-footer">
                   <button className="btn-cancel-modal" onClick={() => setEditingShift(null)}>Cancel</button>
-                  <button className="btn-confirm-modal" onClick={() => handleUpdateShift(editingShift.id, editingShift)}>Save Changes</button>
+                  <button className="btn-confirm-modal" onClick={() => {
+                    // Only send editable fields - do NOT send timeBlocks or they get destroyed
+                    const { timeBlocks, time_blocks, ...shiftUpdates } = editingShift;
+                    handleUpdateShift(editingShift.id, shiftUpdates);
+                  }}>Save Changes</button>
                 </div>
               </div>
             </div>
