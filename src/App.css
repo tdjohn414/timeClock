@@ -4840,6 +4840,21 @@ html, body {
   text-decoration: underline;
 }
 
+.employee-name-cell {
+  cursor: pointer;
+}
+
+.employee-name-link {
+  color: #7c3aed;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.employee-name-link:hover {
+  color: #5b21b6;
+  text-decoration: underline;
+}
+
 /* ==================== SHIFTS TWO-COLUMN LAYOUT ==================== */
 
 .shifts-layout {

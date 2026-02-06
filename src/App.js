@@ -751,6 +751,8 @@ function TimeClock() {
         setAdminToast({ type: 'success', message: 'Shift approved' });
       }
       loadShiftsByWeek(true);
+      // Also refresh employee details view if open
+      if (viewingUserPayWeeks) loadUserPayWeeks(viewingUserPayWeeks);
     } catch (err) {
       console.error('Failed to change status:', err);
       setAdminToast({ type: 'error', message: err.message || 'Failed to change status' });
@@ -5798,7 +5800,42 @@ function TimeClock() {
                                       <span className="shift-date">{new Date(shift.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
                                       <span className="shift-times">{formatTime(shift.clockInTime)} - {formatTime(shift.clockOutTime)}</span>
                                       <span className="shift-hours">{shift.totalHours} hrs</span>
-                                      <span className={`status-badge ${shift.status}`}>{shift.status.replace('_', ' ')}</span>
+                                      {['approved', 'pending_approval', 'paid'].includes(shift.status) ? (
+                                        <div className="status-dropdown-container" onClick={e => e.stopPropagation()}>
+                                          <button
+                                            className={`status-badge clickable ${shift.status}`}
+                                            onClick={() => setStatusDropdownShiftId(statusDropdownShiftId === shift.id ? null : shift.id)}
+                                          >
+                                            {shift.status.replace('_', ' ')} <span className="status-arrow">▾</span>
+                                          </button>
+                                          {statusDropdownShiftId === shift.id && (
+                                            <div className="status-dropdown">
+                                              {shift.status === 'approved' && (
+                                                <button className="status-dropdown-item paid" onClick={() => handleQuickStatusChange(shift.id, 'paid', 'approved')}>
+                                                  Mark as Paid
+                                                </button>
+                                              )}
+                                              {shift.status === 'paid' && (
+                                                <button className="status-dropdown-item approved" onClick={() => handleQuickStatusChange(shift.id, 'approved', 'paid')}>
+                                                  Revert to Approved
+                                                </button>
+                                              )}
+                                              {shift.status === 'pending_approval' && (
+                                                <>
+                                                  <button className="status-dropdown-item approved" onClick={() => handleQuickStatusChange(shift.id, 'approved', 'pending_approval')}>
+                                                    Approve
+                                                  </button>
+                                                  <button className="status-dropdown-item danger" onClick={() => handleQuickDelete(shift.id)}>
+                                                    Delete
+                                                  </button>
+                                                </>
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <span className={`status-badge ${shift.status}`}>{shift.status.replace('_', ' ')}</span>
+                                      )}
                                     </div>
                                   ))}
                                 </div>
@@ -6182,8 +6219,51 @@ function TimeClock() {
               <div className="admin-content shifts-by-week">
                 <div className="shifts-header-bar">
                   <h2>All Shifts</h2>
-                  <button className="btn-create" onClick={() => { if (adminUsers.length === 0) loadAdminUsers(); setCreatingShift(true); }}>+ Create Shift</button>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <button
+                      className="btn-select-mode"
+                      onClick={() => {
+                        if (shiftsSelectMode) {
+                          setShiftsSelectMode(false);
+                          setSelectedShiftIds(new Set());
+                          setBatchActionDropdown(false);
+                        } else {
+                          setShiftsSelectMode(true);
+                        }
+                      }}
+                    >
+                      {shiftsSelectMode ? 'Cancel' : 'Select'}
+                    </button>
+                    <button className="btn-create" onClick={() => { if (adminUsers.length === 0) loadAdminUsers(); setCreatingShift(true); }}>+ Create Shift</button>
+                  </div>
                 </div>
+                {/* Master batch action bar */}
+                {shiftsSelectMode && selectedShiftIds.size > 0 && (
+                  <div className="batch-action-bar">
+                    <span className="selected-count">{selectedShiftIds.size} selected</span>
+                    <button className="btn-batch-paid" onClick={handleBatchMarkPaid}>
+                      Mark as Paid
+                    </button>
+                    <div className="batch-dropdown-container">
+                      <button
+                        className="btn-batch-more"
+                        onClick={() => setBatchActionDropdown(!batchActionDropdown)}
+                      >
+                        More ▾
+                      </button>
+                      {batchActionDropdown && (
+                        <div className="batch-dropdown">
+                          <button
+                            className="batch-dropdown-item danger"
+                            onClick={() => setShowBatchDeleteConfirm(true)}
+                          >
+                            Delete Selected
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Filter Pills */}
                 <div className="shifts-filters">
@@ -6248,48 +6328,7 @@ function TimeClock() {
                       <div key={week.weekStart} className="week-section">
                         <div className="week-header centered">
                           <h3>{week.weekDisplay}</h3>
-                          <button
-                            className="btn-select-mode"
-                            onClick={() => {
-                              if (shiftsSelectMode) {
-                                setShiftsSelectMode(false);
-                                setSelectedShiftIds(new Set());
-                                setBatchActionDropdown(false);
-                              } else {
-                                setShiftsSelectMode(true);
-                              }
-                            }}
-                          >
-                            {shiftsSelectMode ? 'Cancel' : 'Select'}
-                          </button>
                         </div>
-                        {/* Batch action bar when in select mode */}
-                        {shiftsSelectMode && selectedShiftIds.size > 0 && (
-                          <div className="batch-action-bar">
-                            <span className="selected-count">{selectedShiftIds.size} selected</span>
-                            <button className="btn-batch-paid" onClick={handleBatchMarkPaid}>
-                              Mark as Paid
-                            </button>
-                            <div className="batch-dropdown-container">
-                              <button
-                                className="btn-batch-more"
-                                onClick={() => setBatchActionDropdown(!batchActionDropdown)}
-                              >
-                                More ▾
-                              </button>
-                              {batchActionDropdown && (
-                                <div className="batch-dropdown">
-                                  <button
-                                    className="batch-dropdown-item danger"
-                                    onClick={() => setShowBatchDeleteConfirm(true)}
-                                  >
-                                    Delete Selected
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
                         <div className="week-shifts-table">
                           <table className="admin-table">
                             <thead>
@@ -6320,7 +6359,9 @@ function TimeClock() {
                                       />
                                     )}
                                   </td>
-                                  <td>{s.userName || s.user_name}</td>
+                                  <td className="employee-name-cell" onClick={e => { e.stopPropagation(); loadUserPayWeeks(s.user_id || s.userId); }}>
+                                    <span className="employee-name-link">{s.userName || s.user_name}</span>
+                                  </td>
                                   <td>{formatDate(s.date)}</td>
                                   <td>{formatTime(s.clock_in_time)}</td>
                                   <td>{formatTime(s.clock_out_time)}</td>
