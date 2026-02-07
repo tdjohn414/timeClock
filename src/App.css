@@ -341,6 +341,11 @@ html, body {
   background: #fef9e7;
 }
 
+.time-block.unpaid-block {
+  border-left-color: #94a3b8;
+  background: #f1f5f9;
+}
+
 .time-block.editing-block {
   border-left-color: #3b82f6;
   background: #eff6ff;
@@ -816,6 +821,63 @@ html, body {
   box-shadow: 0 4px 12px rgba(243, 156, 18, 0.35);
 }
 
+.btn-pause {
+  background: linear-gradient(135deg, #94a3b8 0%, #64748b 100%);
+  color: white;
+  border: none;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-pause:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(148, 163, 184, 0.35);
+}
+
+.btn-resume {
+  flex: 1;
+  background: linear-gradient(135deg, #27ae60 0%, #219a52 100%);
+  color: white;
+  border: none;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-resume:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(39, 174, 96, 0.35);
+}
+
+.btn-resume:disabled {
+  background: #bdc3c7;
+  cursor: not-allowed;
+}
+
+.btn-cancel-pause {
+  background: transparent;
+  color: #94a3b8;
+  border: 1px solid #e2e8f0;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-cancel-pause:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
 .btn-advance {
   flex: 1;
   background: linear-gradient(135deg, #27ae60 0%, #219a52 100%);
@@ -1147,6 +1209,11 @@ html, body {
   background: #fef9e7;
 }
 
+.completed-block.unpaid-block {
+  border-left-color: #94a3b8;
+  background: #f1f5f9;
+}
+
 /* Slide-out animation when editing a block */
 .completed-block.sliding-out {
   animation: swipeOut 0.25s ease-in forwards;
@@ -1179,6 +1246,11 @@ html, body {
 .completed-block.editing-placeholder.break-block {
   border-left-color: #d4a574;
   background: #fefcf8;
+}
+
+.completed-block.editing-placeholder.unpaid-block {
+  border-left-color: #94a3b8;
+  background: #f1f5f9;
 }
 
 .completed-block.editing-placeholder .placeholder-fade {
@@ -1705,6 +1777,12 @@ html, body {
   font-style: italic;
 }
 
+.history-task.unpaid-task {
+  opacity: 0.7;
+  font-style: italic;
+  color: #94a3b8;
+}
+
 .task-time {
   color: #7f8c8d;
   min-width: 140px;
@@ -2033,6 +2111,11 @@ html, body {
 .preview-block.break-block {
   border-left-color: #f39c12;
   background: #fef9e7;
+}
+
+.preview-block.unpaid-block {
+  border-left-color: #94a3b8;
+  background: #f1f5f9;
 }
 
 .preview-block-header {
@@ -4535,6 +4618,18 @@ html, body {
   align-items: center;
 }
 
+.time-block-row.unpaid {
+  border-left-color: #94a3b8;
+  background: #f1f5f9;
+  align-items: center;
+}
+
+.block-task-col.unpaid-text {
+  color: #94a3b8;
+  font-weight: 600;
+  font-style: italic;
+}
+
 .block-time-col {
   font-weight: 600;
   color: #2c3e50;
@@ -5510,6 +5605,10 @@ html, body {
 
 .mini-block.break {
   color: #f59e0b;
+}
+
+.mini-block.unpaid {
+  color: #94a3b8;
 }
 
 .mini-block .block-tasks {

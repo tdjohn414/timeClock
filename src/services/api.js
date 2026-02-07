@@ -117,7 +117,8 @@ const transformShift = (shift) => {
         startTime: normalizeTime(block.startTime || block.start_time),
         endTime: normalizeTime(block.endTime || block.end_time),
         tasks: block.tasks || '',
-        isBreak: block.isBreak ?? block.is_break ?? false
+        isBreak: block.isBreak ?? block.is_break ?? false,
+        isUnpaid: block.isUnpaid ?? block.is_unpaid ?? false
       };
     });
   }
@@ -215,7 +216,8 @@ export const shiftsAPI = {
       startTime: block.start_time,
       endTime: block.end_time,
       tasks: block.tasks,
-      isBreak: block.is_break
+      isBreak: block.is_break,
+      isUnpaid: block.is_unpaid
     };
   },
 
@@ -230,7 +232,8 @@ export const shiftsAPI = {
       startTime: block.start_time,
       endTime: block.end_time,
       tasks: block.tasks,
-      isBreak: block.is_break
+      isBreak: block.is_break,
+      isUnpaid: block.is_unpaid
     };
   },
 

@@ -209,6 +209,7 @@ function TimeClock() {
   // Auto-save state
   const [pendingShiftId, setPendingShiftId] = useState(null);
   const [autoSaveStatus, setAutoSaveStatus] = useState('idle'); // 'idle', 'saving', 'saved', 'error'
+  const isPaused = currentBlock?.isUnpaid === true; // Derived from currentBlock — no separate state needed
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
   const [recoveryShift, setRecoveryShift] = useState(null);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
@@ -346,6 +347,23 @@ function TimeClock() {
     };
     checkPendingShift();
   }, []);
+
+  // Auto-update currentDate at midnight (only if no shift is in progress)
+  useEffect(() => {
+    if (pendingShiftId) return;
+
+    const now = new Date();
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1);
+    const msUntilMidnight = midnight - now;
+
+    const timeoutId = setTimeout(() => {
+      const next = new Date();
+      const todayStr = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`;
+      setCurrentDate(todayStr);
+    }, msUntilMidnight);
+
+    return () => clearTimeout(timeoutId);
+  }, [pendingShiftId, currentDate]);
 
   // Load notifications for non-admin users on mount
   useEffect(() => {
@@ -946,7 +964,7 @@ function TimeClock() {
       // Calculate total hours from time blocks
       let totalMinutes = 0;
       for (const block of newShiftData.timeBlocks) {
-        if (block.startTime && block.endTime && !block.isBreak) {
+        if (block.startTime && block.endTime && !block.isBreak && !block.isUnpaid) {
           const [startH, startM] = block.startTime.split(':').map(Number);
           const [endH, endM] = block.endTime.split(':').map(Number);
           let mins = (endH * 60 + endM) - (startH * 60 + startM);
@@ -1342,18 +1360,46 @@ function TimeClock() {
       try {
         setAutoSaveStatus('saving');
 
-        // Create shift on server if this is the first block
+        // Determine the correct date for this block
         let shiftId = pendingShiftId;
+        let blockDate = currentDate;
         if (!shiftId) {
-          const shift = await shiftsAPI.clockIn(currentDate, localTimeToUTC(completedBlock.startTime, currentDate));
+          // New shift: use fresh browser date in case currentDate is stale (e.g. past midnight)
+          const now = new Date();
+          blockDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+          if (blockDate !== currentDate) setCurrentDate(blockDate);
+          const shift = await shiftsAPI.clockIn(blockDate, localTimeToUTC(completedBlock.startTime, blockDate));
           shiftId = shift.id;
           setPendingShiftId(shiftId);
+        } else {
+          // Existing shift: check if a previous block crossed midnight
+          for (const block of completedBlocks) {
+            if (block.isGapWidgetPlaceholder) continue;
+            const sMins = timeToMinutes(block.startTime);
+            const eMins = timeToMinutes(block.endTime);
+            if (eMins < sMins) {
+              const d = new Date(blockDate + 'T12:00:00');
+              d.setDate(d.getDate() + 1);
+              blockDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+              break;
+            }
+          }
+        }
+
+        // Check if this block itself crosses midnight
+        let endDate = blockDate;
+        const bsMins = timeToMinutes(completedBlock.startTime);
+        const beMins = timeToMinutes(completedBlock.endTime);
+        if (beMins < bsMins) {
+          const d = new Date(blockDate + 'T12:00:00');
+          d.setDate(d.getDate() + 1);
+          endDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         }
 
         // Save block to server
         const savedBlock = await shiftsAPI.addBlock(shiftId, {
-          startTime: localTimeToUTC(completedBlock.startTime, currentDate),
-          endTime: localTimeToUTC(completedBlock.endTime, currentDate),
+          startTime: localTimeToUTC(completedBlock.startTime, blockDate),
+          endTime: localTimeToUTC(completedBlock.endTime, endDate),
           tasks: completedBlock.tasks,
           isBreak: completedBlock.isBreak || false
         });
@@ -1459,17 +1505,45 @@ function TimeClock() {
         setAutoSaveStatus('saving');
         let shiftId = pendingShiftId;
 
-        // Create shift on server if this is the first block
+        // Determine the correct date for this block
+        let blockDate = currentDate;
         if (!shiftId) {
-          const shift = await shiftsAPI.clockIn(currentDate, localTimeToUTC(breakStartTime, currentDate));
+          // New shift: use fresh browser date in case currentDate is stale
+          const now = new Date();
+          blockDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+          if (blockDate !== currentDate) setCurrentDate(blockDate);
+          const shift = await shiftsAPI.clockIn(blockDate, localTimeToUTC(breakStartTime, blockDate));
           shiftId = shift.id;
           setPendingShiftId(shiftId);
+        } else {
+          // Existing shift: check if a previous block crossed midnight
+          for (const block of completedBlocks) {
+            if (block.isGapWidgetPlaceholder) continue;
+            const sMins = timeToMinutes(block.startTime);
+            const eMins = timeToMinutes(block.endTime);
+            if (eMins < sMins) {
+              const d = new Date(blockDate + 'T12:00:00');
+              d.setDate(d.getDate() + 1);
+              blockDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+              break;
+            }
+          }
+        }
+
+        // Check if break itself crosses midnight
+        let breakEndDate = blockDate;
+        const brsMins = timeToMinutes(breakBlock.startTime);
+        const breMins = timeToMinutes(breakBlock.endTime);
+        if (breMins < brsMins) {
+          const d = new Date(blockDate + 'T12:00:00');
+          d.setDate(d.getDate() + 1);
+          breakEndDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         }
 
         // Only save break block (work block stays in current block for user to submit later)
         const savedBreak = await shiftsAPI.addBlock(shiftId, {
-          startTime: localTimeToUTC(breakBlock.startTime, currentDate),
-          endTime: localTimeToUTC(breakBlock.endTime, currentDate),
+          startTime: localTimeToUTC(breakBlock.startTime, blockDate),
+          endTime: localTimeToUTC(breakBlock.endTime, breakEndDate),
           tasks: breakBlock.tasks,
           isBreak: true
         });
@@ -1483,6 +1557,132 @@ function TimeClock() {
         console.error('Failed to save break:', err);
         // Revert optimistic update on failure
         setCompletedBlocks(prev => prev.filter(b => b.id !== breakBlock.id));
+        setAutoSaveStatus('error');
+        setTimeout(() => setAutoSaveStatus('idle'), 3000);
+      }
+    })();
+  };
+
+  // Pause shift — converts current block to unpaid type
+  const handlePauseShift = () => {
+    if (!currentBlock || !currentBlock.startTime) return;
+    setCurrentBlock(prev => ({ ...prev, isUnpaid: true }));
+    setCurrentTasks(['']);
+  };
+
+  // Cancel pause — reverts current block to normal working block
+  const handleCancelPause = () => {
+    if (!currentBlock) return;
+    setCurrentBlock(prev => {
+      const { isUnpaid, ...rest } = prev;
+      return rest;
+    });
+    setCurrentTasks(['']);
+  };
+
+  // Resume shift — saves unpaid block and creates new working block
+  const handleResumeShift = () => {
+    if (!currentBlock || !currentBlock.startTime || !currentBlock.endTime) return;
+    if (!currentTasks.some(t => t.trim())) return;
+
+    // Validate: start and end cannot be the same
+    if (currentBlock.startTime === currentBlock.endTime) {
+      setToast({ type: 'error', message: 'Start and end times cannot be the same' });
+      setTimeout(() => setToast(null), 3000);
+      return;
+    }
+
+    // Join tasks as reason
+    const completedBlock = {
+      ...currentBlock,
+      tasks: joinTasks(currentTasks),
+      isUnpaid: true
+    };
+
+    // Trigger swipe animation
+    setSwipingBlockId(currentBlock.id);
+
+    // Optimistic update — move to completed, then create new working block
+    setTimeout(() => {
+      setNewlyAddedBlockId(completedBlock.id);
+      setTimeout(() => setNewlyAddedBlockId(null), 300);
+
+      setCompletedBlocks(prev => [...prev, completedBlock]);
+
+      // New working block starts where unpaid block ended
+      const newBlock = {
+        id: Date.now(),
+        startTime: currentBlock.endTime,
+        endTime: '',
+        tasks: ''
+      };
+      setCurrentBlock(newBlock);
+      setCurrentTasks(['']);
+      setSwipingBlockId(null);
+      setEditingBlock(null);
+      setEditingBlockOriginal(null);
+    }, 150);
+
+    // Save to server in background
+    (async () => {
+      try {
+        setAutoSaveStatus('saving');
+
+        let shiftId = pendingShiftId;
+        let blockDate = currentDate;
+        if (!shiftId) {
+          const now = new Date();
+          blockDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+          if (blockDate !== currentDate) setCurrentDate(blockDate);
+          const shift = await shiftsAPI.clockIn(blockDate, localTimeToUTC(completedBlock.startTime, blockDate));
+          shiftId = shift.id;
+          setPendingShiftId(shiftId);
+        } else {
+          // Check if a previous block crossed midnight
+          for (const block of completedBlocks) {
+            if (block.isGapWidgetPlaceholder) continue;
+            const sMins = timeToMinutes(block.startTime);
+            const eMins = timeToMinutes(block.endTime);
+            if (eMins < sMins) {
+              const d = new Date(blockDate + 'T12:00:00');
+              d.setDate(d.getDate() + 1);
+              blockDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+              break;
+            }
+          }
+        }
+
+        // Check if unpaid block itself crosses midnight
+        let endDate = blockDate;
+        const sMins = timeToMinutes(completedBlock.startTime);
+        const eMins = timeToMinutes(completedBlock.endTime);
+        if (eMins < sMins) {
+          const d = new Date(blockDate + 'T12:00:00');
+          d.setDate(d.getDate() + 1);
+          endDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
+
+        const savedBlock = await shiftsAPI.addBlock(shiftId, {
+          startTime: localTimeToUTC(completedBlock.startTime, blockDate),
+          endTime: localTimeToUTC(completedBlock.endTime, endDate),
+          tasks: completedBlock.tasks,
+          isBreak: false,
+          isUnpaid: true
+        });
+
+        setCompletedBlocks(prev => prev.map(b =>
+          b.id === completedBlock.id ? { ...b, serverId: savedBlock.id } : b
+        ));
+        setAutoSaveStatus('saved');
+        setTimeout(() => setAutoSaveStatus('idle'), 2000);
+      } catch (err) {
+        console.error('Failed to save unpaid block:', err);
+        // Revert optimistic update on failure
+        setCompletedBlocks(prev => prev.filter(b => b.id !== completedBlock.id));
+        setCurrentBlock(completedBlock);
+        setCurrentTasks(completedBlock.tasks ? completedBlock.tasks.split(' • ') : ['']);
+        setToast({ type: 'error', message: 'Failed to save unpaid block. Please try again.' });
+        setTimeout(() => setToast(null), 4000);
         setAutoSaveStatus('error');
         setTimeout(() => setAutoSaveStatus('idle'), 3000);
       }
@@ -2344,8 +2544,8 @@ function TimeClock() {
 
   const calculateTotalHours = () => {
     let total = 0;
-    // Filter out placeholder blocks to avoid double-counting during editing
-    [...completedBlocks, currentBlock].filter(Boolean).filter(block => !block.isEditingPlaceholder).forEach(block => {
+    // Filter out placeholder and unpaid blocks to avoid double-counting during editing
+    [...completedBlocks, currentBlock].filter(Boolean).filter(block => !block.isEditingPlaceholder && !block.isUnpaid).forEach(block => {
       const hrs = calculateBlockHours(block.startTime, block.endTime);
       if (hrs) total += parseFloat(hrs);
     });
@@ -2354,6 +2554,12 @@ function TimeClock() {
 
   // Preview shift before saving - shows confirmation modal
   const previewShift = () => {
+    // Guard: cannot clock out while paused
+    if (isPaused) {
+      setToast({ type: 'error', message: 'Resume your shift before clocking out' });
+      setTimeout(() => setToast(null), 3000);
+      return;
+    }
     const allBlocks = [...completedBlocks];
     // Include current block only if fully filled out (start time, end time, AND tasks)
     // This ignores placeholder blocks that only have a start time from "Next Block"
@@ -2376,8 +2582,25 @@ function TimeClock() {
     const clockOutTime = validBlocks[validBlocks.length - 1].endTime || validBlocks[validBlocks.length - 1].startTime;
     const totalHours = calculateTotalHours();
 
+    // Calculate per-block dates for overnight shift support
+    let overnightDate = currentDate;
+    const blockDatesForSave = [];
+    for (let i = 0; i < validBlocks.length; i++) {
+      blockDatesForSave.push(overnightDate);
+      const sMins = timeToMinutes(validBlocks[i].startTime);
+      const eMins = timeToMinutes(validBlocks[i].endTime);
+      if (eMins < sMins) {
+        const d = new Date(overnightDate + 'T12:00:00');
+        d.setDate(d.getDate() + 1);
+        overnightDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      }
+    }
+    const clockOutDate = overnightDate;
+
     const shiftData = {
       date: currentDate,
+      clockOutDate,
+      blockDatesForSave,
       clockInTime,
       clockOutTime,
       totalHours,
@@ -2404,9 +2627,11 @@ function TimeClock() {
           // Check if this block was already saved (exists in completedBlocks)
           const alreadySaved = completedBlocks.some(b => b.id === currentBlock.id);
           if (!alreadySaved) {
+            // Use clockOutDate for the last block (may be after midnight)
+            const lastBlockDate = previewShiftData.clockOutDate || previewShiftData.date;
             await shiftsAPI.addBlock(pendingShiftId, {
-              startTime: localTimeToUTC(currentBlock.startTime, previewShiftData.date),
-              endTime: localTimeToUTC(currentBlock.endTime, previewShiftData.date),
+              startTime: localTimeToUTC(currentBlock.startTime, lastBlockDate),
+              endTime: localTimeToUTC(currentBlock.endTime, lastBlockDate),
               tasks: currentJoinedTasks,
               isBreak: currentBlock.isBreak || false
             });
@@ -2414,25 +2639,36 @@ function TimeClock() {
         }
 
         // Complete the pending shift (clock out) - convert to UTC
-        // Send both clockInTime (from first block) and clockOutTime (from last block)
+        // clockInTime uses shift date, clockOutTime uses clockOutDate (may be next day)
         completedShift = await shiftsAPI.clockOut(
           pendingShiftId,
           localTimeToUTC(previewShiftData.clockInTime, previewShiftData.date),
-          localTimeToUTC(previewShiftData.clockOutTime, previewShiftData.date),
+          localTimeToUTC(previewShiftData.clockOutTime, previewShiftData.clockOutDate || previewShiftData.date),
           previewShiftData.totalHours
         );
       } else {
         // Fallback: create new shift (no pending shift exists)
-        // Need to convert times to UTC since we didn't go through clock-in flow
+        const blockDates = previewShiftData.blockDatesForSave || [];
         completedShift = await shiftsAPI.create({
           ...previewShiftData,
           clockInTime: localTimeToUTC(previewShiftData.clockInTime, previewShiftData.date),
-          clockOutTime: localTimeToUTC(previewShiftData.clockOutTime, previewShiftData.date),
-          timeBlocks: previewShiftData.timeBlocks.map(block => ({
-            ...block,
-            startTime: localTimeToUTC(block.startTime, previewShiftData.date),
-            endTime: localTimeToUTC(block.endTime, previewShiftData.date)
-          }))
+          clockOutTime: localTimeToUTC(previewShiftData.clockOutTime, previewShiftData.clockOutDate || previewShiftData.date),
+          timeBlocks: previewShiftData.timeBlocks.map((block, idx) => {
+            const startDate = blockDates[idx] || previewShiftData.date;
+            let endDateForBlock = startDate;
+            const sMins = timeToMinutes(block.startTime);
+            const eMins = timeToMinutes(block.endTime);
+            if (eMins < sMins) {
+              const d = new Date(startDate + 'T12:00:00');
+              d.setDate(d.getDate() + 1);
+              endDateForBlock = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            }
+            return {
+              ...block,
+              startTime: localTimeToUTC(block.startTime, startDate),
+              endTime: localTimeToUTC(block.endTime, endDateForBlock)
+            };
+          })
         });
       }
 
@@ -2763,12 +2999,12 @@ function TimeClock() {
                   // Count only work blocks for numbering
                   const workBlockNumber = previewShiftData.timeBlocks
                     .slice(0, index + 1)
-                    .filter(b => !b.isBreak).length;
+                    .filter(b => !b.isBreak && !b.isUnpaid).length;
                   return (
-                  <div key={index} className={`preview-block ${block.isBreak ? 'break-block' : ''}`}>
+                  <div key={index} className={`preview-block ${block.isBreak ? 'break-block' : ''} ${block.isUnpaid ? 'unpaid-block' : ''}`}>
                     <div className="preview-block-header">
                       <span className="preview-block-num">
-                        {block.isBreak ? 'Break' : `Block ${workBlockNumber}`}
+                        {block.isUnpaid ? 'Unpaid' : block.isBreak ? 'Break' : `Block ${workBlockNumber}`}
                       </span>
                       <span className="preview-block-time">
                         {formatTime(block.startTime)} - {formatTime(block.endTime)}
@@ -3546,7 +3782,7 @@ function TimeClock() {
             <div className="modal-body">
               <p className="cancel-warning">Are you sure you want to delete this block?</p>
               <p className="cancel-subtext">
-                {deleteBlockTarget.isBreak ? 'Break' : 'Block'}: {formatTime(deleteBlockTarget.startTime)} - {formatTime(deleteBlockTarget.endTime)}
+                {deleteBlockTarget.isUnpaid ? 'Unpaid' : deleteBlockTarget.isBreak ? 'Break' : 'Block'}: {formatTime(deleteBlockTarget.startTime)} - {formatTime(deleteBlockTarget.endTime)}
               </p>
             </div>
             <div className="modal-footer">
@@ -3785,16 +4021,12 @@ function TimeClock() {
             <div className="section-header">
               <h2>Current Block</h2>
               <div className="date-picker">
-                {completedBlocks.length > 0 || pendingShiftId !== null ? (
-                  <span className="date-display-locked">{formatDate(currentDate)}</span>
-                ) : (
-                  <input
-                    type="date"
-                    value={currentDate}
-                    onChange={(e) => setCurrentDate(e.target.value)}
-                    title="Select date for this shift"
-                  />
-                )}
+                <input
+                  type="date"
+                  value={currentDate}
+                  onChange={(e) => setCurrentDate(e.target.value)}
+                  title="Clock-in date"
+                />
               </div>
             </div>
 
@@ -4286,7 +4518,7 @@ function TimeClock() {
 
               {/* Current Block (main input) */}
               {currentBlock ? (
-                <div className={`time-block current-block ${currentBlock.isBreak ? 'break-block' : ''} ${swipingBlockId === currentBlock.id ? 'swiping-out' : ''}`}>
+                <div className={`time-block current-block ${currentBlock.isBreak ? 'break-block' : ''} ${isPaused ? 'unpaid-block' : ''} ${swipingBlockId === currentBlock.id ? 'swiping-out' : ''}`}>
                   <div className="block-header">
                     <span className="block-number">
                       Block {blockCount}
@@ -4586,9 +4818,9 @@ function TimeClock() {
                     </div>
                   </div>
                   <div className="task-field">
-                    <label>Tasks</label>
+                    <label>{isPaused ? 'Reason' : 'Tasks'}</label>
                     {currentTasks.map((task, index) => {
-                      const isPreset = isPresetTask(task);
+                      const isPreset = !isPaused && isPresetTask(task);
                       return (
                         <div key={index} className={`task-input-row ${isPreset ? 'preset-task-row' : ''}`}>
                           {isPreset ? (
@@ -4602,7 +4834,7 @@ function TimeClock() {
                                 newTasks[index] = e.target.value;
                                 setCurrentTasks(newTasks);
                               }}
-                              placeholder={index === 0 ? "What did you work on?" : "Another task..."}
+                              placeholder={isPaused ? "Why are you pausing?" : (index === 0 ? "What did you work on?" : "Another task...")}
                             />
                           )}
                           {(currentTasks.length > 1 || isPreset) && (
@@ -4708,24 +4940,51 @@ function TimeClock() {
                     </div>
                   </div>
                   <div className="block-actions">
-                    {!currentBlock.isBreak && (
-                      <button type="button" className="btn-break" onClick={handleBreak}>
-                        + Break
-                      </button>
+                    {isPaused ? (
+                      <>
+                        <button type="button" className="btn-cancel-pause" onClick={handleCancelPause}>
+                          Cancel Pause
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-resume"
+                          onClick={handleResumeShift}
+                          disabled={
+                            !currentBlock.endTime ||
+                            !currentTasks.some(t => t.trim()) ||
+                            currentBlock.startTime === currentBlock.endTime
+                          }
+                        >
+                          Resume Shift
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        {!currentBlock.isBreak && (
+                          <>
+                            <button type="button" className="btn-break" onClick={handleBreak}>
+                              + Break
+                            </button>
+                            <button type="button" className="btn-pause" onClick={handlePauseShift}>
+                              Pause Shift
+                            </button>
+                          </>
+                        )}
+                        <button
+                          type="button"
+                          className="btn-advance"
+                          onClick={handleAdvanceBlock}
+                          disabled={
+                            !currentBlock.endTime ||
+                            !currentTasks.some(t => t.trim()) ||
+                            currentBlock.startTime === currentBlock.endTime ||
+                            (calculateBlockHours(currentBlock.startTime, currentBlock.endTime) > 3)
+                          }
+                        >
+                          Next Block →
+                        </button>
+                      </>
                     )}
-                    <button
-                      type="button"
-                      className="btn-advance"
-                      onClick={handleAdvanceBlock}
-                      disabled={
-                        !currentBlock.endTime ||
-                        !currentTasks.some(t => t.trim()) ||
-                        currentBlock.startTime === currentBlock.endTime ||
-                        (calculateBlockHours(currentBlock.startTime, currentBlock.endTime) > 3)
-                      }
-                    >
-                      Next Block →
-                    </button>
                   </div>
                 </div>
               ) : (
@@ -4805,7 +5064,7 @@ function TimeClock() {
                   // Count only work blocks for numbering (include placeholders to keep numbers stable)
                   const workBlockNumber = completedBlocks
                     .slice(0, index + 1)
-                    .filter(b => !b.isBreak).length;
+                    .filter(b => !b.isBreak && !b.isUnpaid).length;
 
                   // Slide-out animation classes
                   const isSlidingOut = slidingOutBlockId === block.id;
@@ -4816,10 +5075,10 @@ function TimeClock() {
                   if (block.isEditingPlaceholder) {
                     const taskCount = block.tasks ? block.tasks.split(' • ').length : 1;
                     return (
-                      <div key={block.id} className={`completed-block editing-placeholder ${block.isBreak ? 'break-block' : ''}`}>
+                      <div key={block.id} className={`completed-block editing-placeholder ${block.isBreak ? 'break-block' : ''} ${block.isUnpaid ? 'unpaid-block' : ''}`}>
                         <div className="completed-block-row">
                           <span className="completed-number placeholder-fade">
-                            {block.isBreak ? 'Break' : `#${workBlockNumber}`}
+                            {block.isUnpaid ? 'Unpaid' : block.isBreak ? 'Break' : `#${workBlockNumber}`}
                           </span>
                           <span className="completed-time placeholder-fade">
                             <span className="block-date">{formatShortDate(blockDates[index])}</span>
@@ -4859,11 +5118,11 @@ function TimeClock() {
                   return (
                   <React.Fragment key={block.id}>
                     <div
-                      className={`completed-block ${block.isBreak ? 'break-block' : ''} ${isSlidingOut ? 'sliding-out' : ''} ${isDeleting ? 'deleting' : ''} ${isNewlyAdded ? 'swipe-in' : ''}`}
+                      className={`completed-block ${block.isBreak ? 'break-block' : ''} ${block.isUnpaid ? 'unpaid-block' : ''} ${isSlidingOut ? 'sliding-out' : ''} ${isDeleting ? 'deleting' : ''} ${isNewlyAdded ? 'swipe-in' : ''}`}
                     >
                       <div className="completed-block-row">
                         <span className="completed-number">
-                          {block.isBreak ? 'Break' : `#${workBlockNumber}`}
+                          {block.isUnpaid ? 'Unpaid' : block.isBreak ? 'Break' : `#${workBlockNumber}`}
                         </span>
                         <span className="completed-time">
                           <span className="block-date">{formatShortDate(blockDates[index])}</span>
@@ -5022,7 +5281,7 @@ function TimeClock() {
                                 {isShiftExpanded && shift.timeBlocks && shift.timeBlocks.length > 0 && (
                                   <div className="history-tasks">
                                     {shift.timeBlocks.map((block, i) => (
-                                      <div key={i} className={`history-task ${block.isBreak ? 'break-task' : ''}`}>
+                                      <div key={i} className={`history-task ${block.isBreak ? 'break-task' : ''} ${block.isUnpaid ? 'unpaid-task' : ''}`}>
                                         <span className="task-time">
                                           {formatTime(block.startTime)} - {formatTime(block.endTime)}
                                         </span>
@@ -5377,11 +5636,11 @@ function TimeClock() {
                       <div
                         key={block.id}
                         style={{
-                          background: block.isBreak ? '#fef9e7' : '#f8f9fa',
+                          background: block.isUnpaid ? '#f1f5f9' : block.isBreak ? '#fef9e7' : '#f8f9fa',
                           borderRadius: '8px',
                           padding: '12px',
                           marginBottom: '8px',
-                          borderLeft: `3px solid ${block.isBreak ? '#f39c12' : '#9b59b6'}`
+                          borderLeft: `3px solid ${block.isUnpaid ? '#94a3b8' : block.isBreak ? '#f39c12' : '#9b59b6'}`
                         }}
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
@@ -5391,9 +5650,23 @@ function TimeClock() {
                               <input
                                 type="checkbox"
                                 checked={block.isBreak}
-                                onChange={e => updateNewShiftBlock(block.id, 'isBreak', e.target.checked)}
+                                onChange={e => {
+                                  updateNewShiftBlock(block.id, 'isBreak', e.target.checked);
+                                  if (e.target.checked) updateNewShiftBlock(block.id, 'isUnpaid', false);
+                                }}
                               />
                               Break
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.85rem', color: '#666' }}>
+                              <input
+                                type="checkbox"
+                                checked={block.isUnpaid || false}
+                                onChange={e => {
+                                  updateNewShiftBlock(block.id, 'isUnpaid', e.target.checked);
+                                  if (e.target.checked) updateNewShiftBlock(block.id, 'isBreak', false);
+                                }}
+                              />
+                              Unpaid
                             </label>
                             {newShiftData.timeBlocks.length > 1 && (
                               <button
@@ -5630,6 +5903,30 @@ function TimeClock() {
                     </span>
                   </div>
                   <div className="detail-row">
+                    <span className="detail-label">Unpaid Time</span>
+                    <span className="detail-value">
+                      {(() => {
+                        const toTimeStr = (t) => {
+                          if (!t) return null;
+                          if (typeof t === 'string' && t.includes('T')) {
+                            const d = new Date(t);
+                            return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+                          }
+                          return t;
+                        };
+                        const unpaidHours = (viewingShift.timeBlocks || [])
+                          .filter(b => b.isUnpaid || b.is_unpaid)
+                          .reduce((sum, b) => {
+                            const start = toTimeStr(b.startTime || b.start_time);
+                            const end = toTimeStr(b.endTime || b.end_time);
+                            const hrs = calculateBlockHours(start, end);
+                            return sum + (parseFloat(hrs) || 0);
+                          }, 0);
+                        return unpaidHours > 0 ? `${unpaidHours.toFixed(2)} hrs` : '0 hrs';
+                      })()}
+                    </span>
+                  </div>
+                  <div className="detail-row">
                     <span className="detail-label">Status</span>
                     <span className={`status-badge ${viewingShift.status}`}>{viewingShift.status?.replace('_', ' ')}</span>
                   </div>
@@ -5677,10 +5974,12 @@ function TimeClock() {
                       const needsExpansion = totalLength > 500;
 
                       return (
-                        <div key={blockKey} className={`time-block-row ${block.is_break ? 'break' : ''}`}>
+                        <div key={blockKey} className={`time-block-row ${block.is_break ? 'break' : ''} ${block.is_unpaid ? 'unpaid' : ''}`}>
                           <span className="block-time-col">{formatTime(block.start_time)} → {formatTime(block.end_time) || '...'}</span>
                           {block.is_break ? (
                             <span className="block-task-col break-text">Break</span>
+                          ) : block.is_unpaid ? (
+                            <span className="block-task-col unpaid-text">Unpaid</span>
                           ) : (
                             <div className="block-task-col">
                               {taskItems.length > 0 ? (
@@ -6525,9 +6824,9 @@ function TimeClock() {
                       {expandedPendingShifts.has(shift.id) && shift.timeBlocks && shift.timeBlocks.length > 0 && (
                         <div className="pending-shift-blocks">
                           {shift.timeBlocks.map((block, idx) => (
-                            <div key={idx} className={`mini-block ${block.isBreak || block.is_break ? 'break' : ''}`}>
+                            <div key={idx} className={`mini-block ${block.isBreak || block.is_break ? 'break' : ''} ${block.isUnpaid || block.is_unpaid ? 'unpaid' : ''}`}>
                               <span className="block-time">{formatTime(block.startTime || block.start_time)} - {formatTime(block.endTime || block.end_time)}</span>
-                              {block.isBreak || block.is_break ? <em>Break</em> : <span className="block-tasks">{block.tasks}</span>}
+                              {block.isBreak || block.is_break ? <em>Break</em> : block.isUnpaid || block.is_unpaid ? <em>Unpaid</em> : <span className="block-tasks">{block.tasks}</span>}
                             </div>
                           ))}
                         </div>
