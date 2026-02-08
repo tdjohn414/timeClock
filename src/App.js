@@ -65,6 +65,18 @@ const getWeekBounds = (date = new Date()) => {
   };
 };
 
+// Get week number of the year (Sunday-start weeks)
+const getWeekNumber = (dateStr) => {
+  const date = new Date(dateStr + 'T12:00:00');
+  const weekEnd = new Date(date);
+  weekEnd.setDate(date.getDate() + 6);
+  // If the week crosses into a new year, it's Week 1
+  if (weekEnd.getFullYear() > date.getFullYear()) return 1;
+  const startOfYear = new Date(date.getFullYear(), 0, 1);
+  const dayOfYear = Math.floor((date - startOfYear) / (24 * 60 * 60 * 1000));
+  return Math.ceil((dayOfYear + startOfYear.getDay() + 1) / 7);
+};
+
 // Generate consistent avatar gradient from name
 const getAvatarGradient = (name) => {
   const gradients = [
@@ -130,6 +142,8 @@ function TimeClock() {
   const [shiftsWeeksHasMore, setShiftsWeeksHasMore] = useState(true);
   const [shiftsEmployeeFilter, setShiftsEmployeeFilter] = useState('');
   const [shiftsStatusFilter, setShiftsStatusFilter] = useState('');
+  const [shiftsSortColumn, setShiftsSortColumn] = useState(null); // 'employee','date','clockIn','clockOut','hours','status'
+  const [shiftsSortDir, setShiftsSortDir] = useState('asc');
   const [shiftsSelectMode, setShiftsSelectMode] = useState(false);
   const [selectedShiftIds, setSelectedShiftIds] = useState(new Set());
   const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = useState(false);
@@ -241,6 +255,9 @@ function TimeClock() {
   const [availableWeeks, setAvailableWeeks] = useState([]);
   const [weekSlideDirection, setWeekSlideDirection] = useState(null); // 'left' or 'right' for animation
   const [weeklyViewCache, setWeeklyViewCache] = useState({}); // Cache weekly data by weekStart
+  const [weeklyMultiWeekMode, setWeeklyMultiWeekMode] = useState(false); // false = daily, true = multi-week overview
+  const [multiWeekData, setMultiWeekData] = useState(null);
+  const [multiWeekLoading, setMultiWeekLoading] = useState(false);
 
   // Dashboard Leaderboard Week Navigation State
   const [dashboardWeekStart, setDashboardWeekStart] = useState(null);
@@ -564,7 +581,8 @@ function TimeClock() {
     setShiftsWeeksLoading(true);
     try {
       const offset = reset ? 0 : shiftsWeeksOffset;
-      const params = { weeks: reset ? 2 : 1, offset };
+      const initialWeeks = shiftsEmployeeFilter ? 8 : 2;
+      const params = { weeks: reset ? initialWeeks : 1, offset };
       if (shiftsEmployeeFilter) params.userId = shiftsEmployeeFilter;
 
       const data = await adminAPI.getShiftsByWeek(params);
@@ -636,6 +654,20 @@ function TimeClock() {
       setAdminToast({ type: 'error', message: 'Failed to load weekly view' });
     } finally {
       setWeeklyViewLoading(false);
+    }
+  };
+
+  // Load multi-week summary
+  const loadMultiWeekSummary = async () => {
+    setMultiWeekLoading(true);
+    try {
+      const data = await adminAPI.getMultiWeekSummary(8);
+      setMultiWeekData(data);
+    } catch (err) {
+      console.error('Failed to load multi-week summary:', err);
+      setAdminToast({ type: 'error', message: 'Failed to load multi-week summary' });
+    } finally {
+      setMultiWeekLoading(false);
     }
   };
 
@@ -799,6 +831,35 @@ function TimeClock() {
     }
   };
 
+  // Mark entire pay week as paid (User Details view)
+  const handlePayWeek = async (week) => {
+    const approvedShifts = week.shifts.filter(s => s.status === 'approved');
+    const pendingShifts = week.shifts.filter(s => s.status === 'pending_approval');
+
+    if (pendingShifts.length > 0) {
+      setAdminToast({ type: 'error', message: `${pendingShifts.length} shift${pendingShifts.length > 1 ? 's' : ''} still pending approval. Approve all shifts before marking week as paid.` });
+      return;
+    }
+
+    if (approvedShifts.length === 0) return;
+
+    if (!window.confirm(
+      `Mark ${approvedShifts.length} approved shift${approvedShifts.length > 1 ? 's' : ''} as paid for this week?`
+    )) return;
+
+    try {
+      const result = await adminAPI.batchMarkPaid(approvedShifts.map(s => s.id));
+      setAdminToast({
+        type: 'success',
+        message: `Marked ${result.marked?.length || approvedShifts.length} shifts as paid`
+      });
+      if (viewingUserPayWeeks) loadUserPayWeeks(viewingUserPayWeeks);
+    } catch (err) {
+      console.error('Failed to pay week:', err);
+      setAdminToast({ type: 'error', message: err.message || 'Failed to mark week as paid' });
+    }
+  };
+
   // Batch delete shifts
   const handleBatchDeleteShifts = async () => {
     if (selectedShiftIds.size === 0) return;
@@ -819,6 +880,35 @@ function TimeClock() {
   };
 
   // Toggle shift selection
+  // Sort handler for All Shifts columns
+  const handleShiftsSort = (column) => {
+    if (shiftsSortColumn === column) {
+      setShiftsSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setShiftsSortColumn(column);
+      setShiftsSortDir('asc');
+    }
+  };
+
+  const sortShifts = (shifts) => {
+    if (!shiftsSortColumn) return shifts;
+    return [...shifts].sort((a, b) => {
+      let valA, valB;
+      switch (shiftsSortColumn) {
+        case 'employee': valA = (a.userName || a.user_name || '').toLowerCase(); valB = (b.userName || b.user_name || '').toLowerCase(); break;
+        case 'date': valA = a.date || ''; valB = b.date || ''; break;
+        case 'clockIn': valA = a.clock_in_time || ''; valB = b.clock_in_time || ''; break;
+        case 'clockOut': valA = a.clock_out_time || ''; valB = b.clock_out_time || ''; break;
+        case 'hours': valA = parseFloat(a.total_hours) || 0; valB = parseFloat(b.total_hours) || 0; break;
+        case 'status': valA = a.status || ''; valB = b.status || ''; break;
+        default: return 0;
+      }
+      if (valA < valB) return shiftsSortDir === 'asc' ? -1 : 1;
+      if (valA > valB) return shiftsSortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  };
+
   const toggleShiftSelection = (shiftId) => {
     setSelectedShiftIds(prev => {
       const newSet = new Set(prev);
@@ -5207,7 +5297,7 @@ function TimeClock() {
                         }}
                       >
                         <span className="expand-icon">{isWeekExpanded ? '▼' : '▶'}</span>
-                        <span className="week-display">{week.weekDisplay}</span>
+                        <span className="week-display"><strong>Week {getWeekNumber(week.weekStart)}:</strong> <span style={{fontWeight: 'normal'}}>{week.weekDisplay}</span></span>
                         <span className="week-hours">{week.totalHours} hrs</span>
                         <span className="week-shift-count">{week.shifts.length} shift{week.shifts.length !== 1 ? 's' : ''}</span>
                       </div>
@@ -6072,7 +6162,7 @@ function TimeClock() {
                           return (
                             <div key={week.weekStart} className="pay-week-card">
                               <div
-                                className="pay-week-header"
+                                className={`pay-week-header${week.allPaid ? ' week-paid' : ''}`}
                                 onClick={() => {
                                   const newSet = new Set(expandedPayWeeks);
                                   if (isExpanded) {
@@ -6083,8 +6173,24 @@ function TimeClock() {
                                   setExpandedPayWeeks(newSet);
                                 }}
                               >
-                                <span className="week-dates">{week.weekDisplay}</span>
-                                <span className="week-hours">{week.approvedHours} hrs approved</span>
+                                <span className="week-dates"><strong>Week {getWeekNumber(week.weekStart)}:</strong> <span style={{fontWeight: 'normal'}}>{week.weekDisplay}</span></span>
+                                <span className={`week-hours${week.allPaid ? ' week-hours-paid' : ''}`}>
+                                  {week.allPaid ? `${week.approvedHours} hrs paid` : `${week.approvedHours} hrs approved`}
+                                </span>
+                                <div className="week-actions" onClick={e => e.stopPropagation()}>
+                                  {week.allPaid && week.paidAt ? (
+                                    <span className="week-paid-timestamp">
+                                      Paid {new Date(week.paidAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                    </span>
+                                  ) : week.shifts.some(s => s.status === 'approved') ? (
+                                    <button
+                                      className="btn-pay-week"
+                                      onClick={() => handlePayWeek(week)}
+                                    >
+                                      Mark Week as Paid
+                                    </button>
+                                  ) : null}
+                                </div>
                                 <span className="expand-icon">{isExpanded ? '▼' : '▶'}</span>
                               </div>
                               {isExpanded && (
@@ -6197,15 +6303,19 @@ function TimeClock() {
                             </button>
                           ) : <span className="btn-leaderboard-arrow-placeholder" />;
                         })()}
-                        <h3 className="week-range">{dashboardLeaderboard?.weekDisplay || (() => {
-                          const today = new Date();
-                          const day = today.getDay();
-                          const weekStart = new Date(today);
-                          weekStart.setDate(today.getDate() - day);
-                          const weekEnd = new Date(weekStart);
-                          weekEnd.setDate(weekStart.getDate() + 6);
-                          const formatD = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                          return `${formatD(weekStart)} - ${formatD(weekEnd)}`;
+                        <h3 className="week-range">{(() => {
+                          const ws = dashboardWeekStart || getWeekBounds().weekStart;
+                          const display = dashboardLeaderboard?.weekDisplay || (() => {
+                            const today = new Date();
+                            const day = today.getDay();
+                            const weekStart = new Date(today);
+                            weekStart.setDate(today.getDate() - day);
+                            const weekEnd = new Date(weekStart);
+                            weekEnd.setDate(weekStart.getDate() + 6);
+                            const formatD = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                            return `${formatD(weekStart)} - ${formatD(weekEnd)}`;
+                          })();
+                          return <><strong>Week {getWeekNumber(ws)}:</strong> <span style={{fontWeight: 'normal'}}>{display}</span></>;
                         })()}</h3>
                         {(() => {
                           // Check if we can go to next week (not past current week)
@@ -6626,24 +6736,30 @@ function TimeClock() {
                       return (
                       <div key={week.weekStart} className="week-section">
                         <div className="week-header centered">
-                          <h3>{week.weekDisplay}</h3>
+                          <h3><strong>Week {getWeekNumber(week.weekStart)}:</strong> <span style={{fontWeight: 'normal'}}>{week.weekDisplay}</span></h3>
                         </div>
                         <div className="week-shifts-table">
                           <table className="admin-table">
                             <thead>
                               <tr>
                                 <th className="checkbox-col"></th>
-                                <th>Employee</th>
-                                <th>Date</th>
-                                <th>Clock In</th>
-                                <th>Clock Out</th>
-                                <th>Hours</th>
-                                <th>Status</th>
+                                {[
+                                  { key: 'employee', label: 'Employee' },
+                                  { key: 'date', label: 'Date' },
+                                  { key: 'clockIn', label: 'Clock In' },
+                                  { key: 'clockOut', label: 'Clock Out' },
+                                  { key: 'hours', label: 'Hours' },
+                                  { key: 'status', label: 'Status' },
+                                ].map(col => (
+                                  <th key={col.key} className="sortable-th" onClick={() => handleShiftsSort(col.key)}>
+                                    {col.label} {shiftsSortColumn === col.key ? (shiftsSortDir === 'asc' ? '▲' : '▼') : ''}
+                                  </th>
+                                ))}
                                 <th>Actions</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {filteredShifts.map(s => (
+                              {sortShifts(filteredShifts).map(s => (
                                 <tr
                                   key={s.id}
                                   className={`clickable-row ${selectedShiftIds.has(s.id) ? 'selected-row' : ''}`}
@@ -6871,6 +6987,93 @@ function TimeClock() {
           {/* Weekly View Sub-Tab */}
           {adminSubTab === 'weekly' && (
             <div className="admin-content">
+                  {/* View Mode Toggle: Daily vs Multi-Week */}
+                  <div className="weekly-mode-toggle">
+                    <button
+                      className={`weekly-mode-btn ${!weeklyMultiWeekMode ? 'active' : ''}`}
+                      onClick={() => setWeeklyMultiWeekMode(false)}
+                    >
+                      Daily
+                    </button>
+                    <button
+                      className={`weekly-mode-btn ${weeklyMultiWeekMode ? 'active' : ''}`}
+                      onClick={() => {
+                        setWeeklyMultiWeekMode(true);
+                        if (!multiWeekData) loadMultiWeekSummary();
+                      }}
+                    >
+                      Multi-Week
+                    </button>
+                  </div>
+
+                  {/* Multi-Week Overview */}
+                  {weeklyMultiWeekMode ? (
+                    multiWeekLoading ? (
+                      <p className="loading-text">Loading multi-week summary...</p>
+                    ) : multiWeekData ? (
+                      <div className="multi-week-container">
+                        <div className="multi-week-grid" style={{ '--mw-cols': multiWeekData.weeks.length }}>
+                          {/* Header row: Employee + week columns */}
+                          <div className="multi-week-header-row">
+                            <div className="multi-week-employee-header">Employee</div>
+                            {multiWeekData.weeks.map(week => (
+                              <div key={week.weekStart} className="multi-week-col-header">
+                                <span className="mw-week-num">Wk {getWeekNumber(week.weekStart)}</span>
+                                <span className="mw-week-dates">{week.weekDisplay}</span>
+                              </div>
+                            ))}
+                            <div className="multi-week-col-header multi-week-total-header">Total</div>
+                          </div>
+
+                          {/* Employee rows */}
+                          {multiWeekData.employees.map(emp => {
+                            const empColor = `hsl(${(emp.userId * 137) % 360}, 70%, 50%)`;
+                            return (
+                              <div key={emp.userId} className={`multi-week-row ${emp.grandTotal === 0 ? 'no-hours' : ''}`}>
+                                <div className="multi-week-employee-cell" style={{ borderLeftColor: empColor }}>
+                                  <span className="mw-emp-name">{emp.userName}</span>
+                                </div>
+                                {multiWeekData.weeks.map(week => {
+                                  const entry = emp.weeklyHours[week.weekStart];
+                                  return (
+                                    <div
+                                      key={week.weekStart}
+                                      className={`multi-week-hours-cell ${entry ? 'has-hours' : ''}`}
+                                      onClick={() => {
+                                        if (entry) {
+                                          setWeeklyMultiWeekMode(false);
+                                          loadWeeklyView(week.weekStart);
+                                        }
+                                      }}
+                                      style={entry ? { cursor: 'pointer' } : {}}
+                                    >
+                                      {entry ? (
+                                        <>
+                                          <span className="mw-hours-total">{entry.total}h</span>
+                                          {entry.pending > 0 && (
+                                            <span className="mw-hours-pending">{entry.pending}h pending</span>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <span className="mw-hours-empty">-</span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                                <div className="multi-week-hours-cell multi-week-total-cell">
+                                  <span className="mw-hours-total">{emp.grandTotal > 0 ? `${emp.grandTotal}h` : '-'}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="empty-text">No data available</p>
+                    )
+                  ) : (
+                  /* Daily View (existing) */
+                  <>
                   <div className="weekly-view-container">
                     {/* Weeks Sidebar Backdrop */}
                     <div
@@ -6962,7 +7165,7 @@ function TimeClock() {
                           >
                             ◀
                           </button>
-                          <h3>{weeklyViewData?.weekDisplay || 'Loading...'}</h3>
+                          <h3>{weeklyViewData ? <><strong>Week {getWeekNumber(weeklyViewData.weekStart)}:</strong> <span style={{fontWeight: 'normal'}}>{weeklyViewData.weekDisplay}</span></> : 'Loading...'}</h3>
                           {/* Next (newer) week arrow - don't go past current week */}
                           {(() => {
                             // Calculate current week's Sunday using local time
@@ -7099,6 +7302,8 @@ function TimeClock() {
                   )}
                     </div>{/* End weekly-main-content */}
                   </div>{/* End weekly-view-container */}
+                  </>
+                  )}
             </div>
           )}
 

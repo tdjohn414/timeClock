@@ -2896,7 +2896,6 @@ html, body {
 .admin-layout {
   display: flex;
   gap: 24px;
-  min-height: calc(100vh - 120px);
 }
 
 .admin-sidebar {
@@ -3112,7 +3111,6 @@ html, body {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   padding: 24px;
   flex: 1;
-  min-height: calc(100vh - 180px);
 }
 
 /* Stats Grid */
@@ -3453,6 +3451,16 @@ html, body {
   border-bottom: 2px solid #eee;
 }
 
+.admin-table th.sortable-th {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.admin-table th.sortable-th:hover {
+  color: #3498db;
+}
+
 .admin-table td {
   padding: 14px 16px;
   border-bottom: 1px solid #eee;
@@ -3473,7 +3481,6 @@ html, body {
   padding: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
-  min-height: calc(100vh - 180px);
 }
 
 .shifts-header-bar {
@@ -3643,10 +3650,6 @@ html, body {
 
 /* Select mode button */
 .btn-select-mode {
-  position: absolute;
-  right: 16px;
-  top: 50%;
-  transform: translateY(-50%);
   background: transparent;
   border: none;
   color: #3b82f6;
@@ -6321,6 +6324,165 @@ html, body {
   .weekly-calendar-grid.mobile-hidden {
     display: none;
   }
+}
+
+/* Weekly Mode Toggle (Daily vs Multi-Week) */
+.weekly-mode-toggle {
+  display: flex;
+  gap: 0;
+  margin-bottom: 16px;
+  background: #f1f5f9;
+  border-radius: 8px;
+  padding: 4px;
+  width: fit-content;
+}
+
+.weekly-mode-btn {
+  padding: 8px 20px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 0.9rem;
+  color: #64748b;
+  transition: all 0.2s;
+}
+
+.weekly-mode-btn:hover {
+  color: #334155;
+}
+
+.weekly-mode-btn.active {
+  background: white;
+  color: #334155;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Multi-Week Overview Grid */
+.multi-week-container {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.multi-week-grid {
+  min-width: 600px;
+}
+
+.multi-week-header-row {
+  display: grid;
+  grid-template-columns: 140px repeat(var(--mw-cols), 1fr) 80px;
+  background: #f8fafc;
+  border-bottom: 2px solid #e2e8f0;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.multi-week-employee-header {
+  padding: 12px 16px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #475569;
+  display: flex;
+  align-items: center;
+}
+
+.multi-week-col-header {
+  padding: 8px 6px;
+  text-align: center;
+  border-left: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.multi-week-total-header {
+  font-weight: 700;
+  background: #f1f5f9;
+}
+
+.mw-week-num {
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: #334155;
+}
+
+.mw-week-dates {
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+
+/* Employee rows */
+.multi-week-row {
+  display: grid;
+  grid-template-columns: 140px repeat(var(--mw-cols), 1fr) 80px;
+  border-bottom: 1px solid #f1f5f9;
+  transition: background 0.15s;
+}
+
+.multi-week-row:hover {
+  background: #fafbfd;
+}
+
+.multi-week-row.no-hours {
+  opacity: 0.5;
+}
+
+.multi-week-employee-cell {
+  padding: 12px 12px 12px 16px;
+  border-left: 3px solid transparent;
+  display: flex;
+  align-items: center;
+}
+
+.mw-emp-name {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #334155;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.multi-week-hours-cell {
+  padding: 8px 6px;
+  text-align: center;
+  border-left: 1px solid #f1f5f9;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.multi-week-hours-cell.has-hours:hover {
+  background: #eff6ff;
+}
+
+.multi-week-total-cell {
+  background: #f8fafc;
+  font-weight: 600;
+}
+
+.mw-hours-total {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.mw-hours-pending {
+  font-size: 0.65rem;
+  color: #f59e0b;
+  font-weight: 500;
+}
+
+.mw-hours-empty {
+  color: #cbd5e1;
+  font-size: 0.85rem;
 }
 
 /* User Pay Weeks View */

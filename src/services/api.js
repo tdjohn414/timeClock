@@ -457,6 +457,9 @@ export const adminAPI = {
     return request(`/admin/users/${userId}/pay-weeks${queryString ? `?${queryString}` : ''}`);
   },
 
+  // Multi-week summary (hours per employee per week)
+  getMultiWeekSummary: (weeks = 8) => request(`/admin/weekly-view/summary?weeks=${weeks}`),
+
   // Get available weeks with shifts
   getAvailableWeeks: () => request('/admin/available-weeks'),
 
