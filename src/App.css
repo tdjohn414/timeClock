@@ -5422,7 +5422,7 @@ html, body {
 }
 
 .pending-shift-card {
-  background: linear-gradient(45deg, #fffae0, transparent);
+  background: linear-gradient(45deg, #f0f5ff, transparent);
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 16px;
@@ -5490,7 +5490,7 @@ html, body {
 .pending-shift-times .hours {
   display: block;
   font-weight: 700;
-  color: #f59e0b;
+  color: #3b82f6;
   font-size: 1.25rem;
 }
 

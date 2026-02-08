@@ -5807,22 +5807,24 @@ function TimeClock() {
                                         ✏️
                                       </button>
                                     )}
-                                    <button
-                                      type="button"
-                                      className="btn-delete-shift"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (window.confirm('Delete this shift?')) {
-                                          shiftsAPI.delete(shiftId).then(() => {
-                                            // Refresh pay weeks after deletion (reset to reload all)
-                                            setMyPayWeeksOffset(0);
-                                            loadMyPayWeeks(true);
-                                          }).catch(err => alert('Failed to delete: ' + err.message));
-                                        }
-                                      }}
-                                    >
-                                      ×
-                                    </button>
+                                    {shift.status !== 'approved' && shift.status !== 'paid' && (
+                                      <button
+                                        type="button"
+                                        className="btn-delete-shift"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (window.confirm('Delete this shift?')) {
+                                            shiftsAPI.delete(shiftId).then(() => {
+                                              // Refresh pay weeks after deletion (reset to reload all)
+                                              setMyPayWeeksOffset(0);
+                                              loadMyPayWeeks(true);
+                                            }).catch(err => alert('Failed to delete: ' + err.message));
+                                          }
+                                        }}
+                                      >
+                                        ×
+                                      </button>
+                                    )}
                                     <span className="history-hours">{isInProgress ? '--' : shift.totalHours} hrs</span>
                                   </div>
                                 </div>
@@ -7119,7 +7121,10 @@ function TimeClock() {
           {adminSubTab === 'payroll' && (
             <div className="admin-content payroll-view">
               {payrollLoading && !payrollData ? (
-                <div className="loading-spinner">Loading payroll...</div>
+                <div className="loading-spinner-container">
+                  <div className="loading-spinner"></div>
+                  <p>Loading payroll...</p>
+                </div>
               ) : payrollData ? (
                 <>
                   {/* Week Navigation */}
