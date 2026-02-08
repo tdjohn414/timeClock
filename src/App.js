@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
+import { jsPDF } from 'jspdf';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { shiftsAPI, authAPI, adminAPI, notificationsAPI, localTimeToUTC } from './services/api';
+import { shiftsAPI, authAPI, adminAPI, notificationsAPI, invoicesAPI, localTimeToUTC } from './services/api';
 import Login from './components/Login';
 import Register from './components/Register';
 import './App.css';
@@ -173,6 +174,12 @@ function TimeClock() {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [adminToast, setAdminToast] = useState(null);
+  // Invoices State
+  const [invoices, setInvoices] = useState([]);
+  const [invoicesLoading, setInvoicesLoading] = useState(false);
+
+  const [viewingInvoice, setViewingInvoice] = useState(null);
+  const [invoiceFilter, setInvoiceFilter] = useState('');
   const [currentDate, setCurrentDate] = useState(() => {
     const now = new Date();
     const year = now.getFullYear();
@@ -255,9 +262,13 @@ function TimeClock() {
   const [availableWeeks, setAvailableWeeks] = useState([]);
   const [weekSlideDirection, setWeekSlideDirection] = useState(null); // 'left' or 'right' for animation
   const [weeklyViewCache, setWeeklyViewCache] = useState({}); // Cache weekly data by weekStart
-  const [weeklyMultiWeekMode, setWeeklyMultiWeekMode] = useState(false); // false = daily, true = multi-week overview
-  const [multiWeekData, setMultiWeekData] = useState(null);
-  const [multiWeekLoading, setMultiWeekLoading] = useState(false);
+  // Period view state: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'biannual'
+  const [weeklyPeriodTab, setWeeklyPeriodTab] = useState('daily');
+  const [periodData, setPeriodData] = useState(null);
+  const [periodLoading, setPeriodLoading] = useState(false);
+  const [periodOffset, setPeriodOffset] = useState(0);
+  const [periodHasOlder, setPeriodHasOlder] = useState(false);
+  const [periodHasNewer, setPeriodHasNewer] = useState(false);
 
   // Dashboard Leaderboard Week Navigation State
   const [dashboardWeekStart, setDashboardWeekStart] = useState(null);
@@ -270,6 +281,14 @@ function TimeClock() {
   const [userPayWeeksData, setUserPayWeeksData] = useState(null);
   const [userPayWeeksLoading, setUserPayWeeksLoading] = useState(false);
   const [expandedPayWeeks, setExpandedPayWeeks] = useState(new Set());
+
+  // Payroll Tab State
+  const [payrollData, setPayrollData] = useState(null);
+  const [payrollLoading, setPayrollLoading] = useState(false);
+  const [payrollWeekStart, setPayrollWeekStart] = useState(null);
+  const [payrollAvailableWeeks, setPayrollAvailableWeeks] = useState([]);
+  const [payrollRevertMenuOpen, setPayrollRevertMenuOpen] = useState(null);
+  const [expandedPayrollEmployees, setExpandedPayrollEmployees] = useState(new Set());
 
   // Activity Modal State
   const [showActivityModal, setShowActivityModal] = useState(false);
@@ -405,10 +424,16 @@ function TimeClock() {
         if (adminUsers.length === 0) loadAdminUsers(); // For Create Shift modal
       } else if (adminSubTab === 'pending' && pendingShifts.length === 0) {
         loadPendingShifts();
-      } else if (adminSubTab === 'weekly' && !weeklyViewData) {
-        loadWeeklyView();
+      } else if (adminSubTab === 'weekly') {
+        if (weeklyPeriodTab === 'daily' && !weeklyViewData) {
+          loadWeeklyView();
+        } else if (weeklyPeriodTab !== 'daily' && !periodData) {
+          loadPeriodSummary();
+        }
       } else if (adminSubTab === 'activity' && !activityData.activity?.length) {
         loadActivity();
+      } else if (adminSubTab === 'invoices' && invoices.length === 0) {
+        loadInvoices();
       }
     }
   }, [activeTab, adminSubTab, isAdmin]);
@@ -623,6 +648,227 @@ function TimeClock() {
     }
   };
 
+  const loadInvoices = async () => {
+    setInvoicesLoading(true);
+    try {
+      const data = await invoicesAPI.getAll();
+      setInvoices(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Failed to load invoices:', err);
+      setAdminToast({ type: 'error', message: 'Failed to load invoices' });
+    } finally {
+      setInvoicesLoading(false);
+    }
+  };
+
+  const handleDeleteInvoice = async (invoiceId) => {
+    if (deleteConfirmText !== 'DELETE') return;
+    try {
+      await invoicesAPI.delete(invoiceId);
+      setAdminToast({ type: 'success', message: 'Invoice deleted' });
+      setDeleteConfirm(null);
+      setDeleteConfirmText('');
+      loadInvoices();
+    } catch (err) {
+      setAdminToast({ type: 'error', message: err.message || 'Failed to delete invoice' });
+    }
+  };
+
+  const handleToggleSent = async (invoiceId) => {
+    try {
+      const updated = await invoicesAPI.toggleSent(invoiceId);
+      setInvoices(prev => prev.map(inv => inv.id === invoiceId ? updated : inv));
+    } catch (err) {
+      setAdminToast({ type: 'error', message: err.message || 'Failed to update sent status' });
+    }
+  };
+
+  const handleTogglePaid = async (invoiceId) => {
+    try {
+      const updated = await invoicesAPI.togglePaid(invoiceId);
+      setInvoices(prev => prev.map(inv => inv.id === invoiceId ? updated : inv));
+    } catch (err) {
+      setAdminToast({ type: 'error', message: err.message || 'Failed to update paid status' });
+    }
+  };
+
+  const generateInvoicePDF = async (invoice) => {
+    const formatCurrency = (num) => '$' + Number(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formatCurrencyNoDecimals = (num) => '$' + Math.floor(Number(num)).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
+    const invoiceDate = invoice.invoice_date
+      ? new Date(invoice.invoice_date).toLocaleDateString('en-US', { timeZone: 'UTC' }).replace(/\//g, '-')
+      : new Date(invoice.created_at).toLocaleDateString('en-US').replace(/\//g, '-');
+
+    const doc = new jsPDF({ format: [210, 285] });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 20;
+
+    const primaryColor = [22, 79, 109];
+    const darkColor = [60, 60, 60];
+
+    // Logo
+    try {
+      const logoUrl = 'https://res.cloudinary.com/dqvolqe3u/image/upload/v1770090690/NEW_Full_Scope_Estimating_Logo-Picsart-BackgroundRemover_igaenb.png';
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = logoUrl;
+      });
+      doc.addImage(img, 'PNG', margin, 10, 60, 24);
+    } catch (err) {
+      doc.setFontSize(20);
+      doc.setTextColor(...darkColor);
+      doc.setFont('helvetica', 'bold');
+      doc.text('FullScope Estimating', margin, 25);
+    }
+
+    // INVOICE title
+    doc.setFontSize(32);
+    doc.setTextColor(...primaryColor);
+    doc.setFont('helvetica', 'bold');
+    doc.text('INVOICE', pageWidth - margin, 27, { align: 'right' });
+
+    // Header line
+    doc.setDrawColor(...primaryColor);
+    doc.setLineWidth(0.5);
+    doc.line(margin, 38, pageWidth - margin, 38);
+
+    // Bill To & Invoice Details
+    const detailsY = 48;
+
+    doc.setFontSize(10);
+    doc.setTextColor(...primaryColor);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Bill To', margin, detailsY);
+
+    doc.setFontSize(11);
+    doc.setTextColor(...darkColor);
+    doc.setFont('helvetica', 'bold');
+    doc.text(invoice.company_name || '', margin, detailsY + 8);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text(invoice.company_address || '', margin, detailsY + 15);
+    doc.text(invoice.company_city_state_zip || '', margin, detailsY + 21);
+    doc.text(`Attn: ${invoice.contact_name || ''}`, margin, detailsY + 28);
+
+    // Invoice details - right side
+    const labelX = pageWidth - margin - 40;
+    const valueX = pageWidth - margin;
+
+    doc.setFontSize(10);
+    doc.setTextColor(...primaryColor);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Invoice #:', labelX, detailsY, { align: 'right' });
+    doc.text('Date:', labelX, detailsY + 7, { align: 'right' });
+    if (invoice.job_name) {
+      doc.text('Job Name:', labelX, detailsY + 14, { align: 'right' });
+    }
+
+    doc.setTextColor(...darkColor);
+    doc.setFont('helvetica', 'normal');
+    doc.text(String(invoice.invoice_number), valueX, detailsY, { align: 'right' });
+    doc.text(invoiceDate, valueX, detailsY + 7, { align: 'right' });
+    if (invoice.job_name) {
+      doc.text(invoice.job_name, valueX, detailsY + 14, { align: 'right' });
+    }
+
+    // Table
+    const tableY = 90;
+
+    doc.setFontSize(9);
+    doc.setTextColor(...primaryColor);
+    doc.setFont('helvetica', 'bold');
+    doc.text('DESCRIPTION', margin, tableY);
+    doc.text('AMOUNT', pageWidth - margin, tableY, { align: 'right' });
+
+    doc.setDrawColor(...primaryColor);
+    doc.setLineWidth(0.5);
+    doc.line(margin, tableY + 3, pageWidth - margin, tableY + 3);
+
+    // Row - Supplement increase
+    const row1Y = tableY + 15;
+    doc.setTextColor(...darkColor);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text(`Supplement Increase of ${formatCurrencyNoDecimals(Number(invoice.difference))}`, margin, row1Y);
+    doc.text(formatCurrency(Number(invoice.invoice_amount)), pageWidth - margin, row1Y, { align: 'right' });
+
+    // Line under row
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.3);
+    doc.line(margin, row1Y + 6, pageWidth - margin, row1Y + 6);
+
+    const totalAmount = Number(invoice.invoice_amount);
+
+    // Totals
+    const totalsY = row1Y + 20;
+    const totalsLabelX = 120;
+    const totalsValueX = pageWidth - margin;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(100, 100, 100);
+    doc.text('Subtotal:', totalsLabelX, totalsY);
+    doc.setTextColor(...primaryColor);
+    doc.setFont('helvetica', 'bold');
+    doc.text(formatCurrency(totalAmount), totalsValueX, totalsY, { align: 'right' });
+
+    doc.setDrawColor(...primaryColor);
+    doc.setLineWidth(0.5);
+    doc.line(totalsLabelX, totalsY + 6, pageWidth - margin, totalsY + 6);
+
+    // Balance Due
+    doc.setFontSize(11);
+    doc.setTextColor(...primaryColor);
+    doc.setFont('helvetica', 'bold');
+    doc.text('BALANCE DUE:', totalsLabelX, totalsY + 16);
+    doc.text(formatCurrency(totalAmount), totalsValueX, totalsY + 16, { align: 'right' });
+
+    // Payment Options & Company Info
+    const termsY = 240;
+
+    doc.setFontSize(10);
+    doc.setTextColor(...primaryColor);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Payment Options', margin, termsY);
+
+    doc.setFontSize(9);
+    doc.setTextColor(100, 100, 100);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Zelle: (480) 776-4626', margin, termsY + 7);
+    doc.text('Checks accepted - mail to address on right', margin, termsY + 14);
+    doc.text('Please reference invoice number or project name with payment.', margin, termsY + 21);
+
+    doc.setFontSize(10);
+    doc.setTextColor(...darkColor);
+    doc.setFont('helvetica', 'bold');
+    doc.text('FullScope Estimating', pageWidth - margin, termsY, { align: 'right' });
+
+    doc.setFontSize(9);
+    doc.setTextColor(100, 100, 100);
+    doc.setFont('helvetica', 'normal');
+    doc.text('2210 W Olla Circle', pageWidth - margin, termsY + 7, { align: 'right' });
+    doc.text('Mesa, AZ 85202', pageWidth - margin, termsY + 14, { align: 'right' });
+    doc.text('(480) 906-3383', pageWidth - margin, termsY + 21, { align: 'right' });
+
+    // Footer
+    const footerY = 275;
+    doc.setDrawColor(...primaryColor);
+    doc.setLineWidth(0.5);
+    doc.line(margin, footerY - 5, pageWidth - margin, footerY - 5);
+
+    doc.setFontSize(9);
+    doc.setTextColor(150, 150, 150);
+    doc.setFont('helvetica', 'italic');
+    doc.text('Thank you for trusting FullScope Estimating with your supplement needs.', pageWidth / 2, footerY + 3, { align: 'center' });
+
+    doc.save(`Invoice-${invoice.invoice_number}.pdf`);
+  };
+
   // Load weekly view data (with caching)
   const loadWeeklyView = async (weekStart = null, forceRefresh = false) => {
     // Check cache first (unless force refresh)
@@ -657,17 +903,165 @@ function TimeClock() {
     }
   };
 
-  // Load multi-week summary
-  const loadMultiWeekSummary = async () => {
-    setMultiWeekLoading(true);
+  // Load period summary (weekly/monthly/quarterly/biannual)
+  const loadPeriodSummary = async (periodType = weeklyPeriodTab, offset = 0) => {
+    if (periodType === 'daily') return;
+    setPeriodLoading(true);
+    setPeriodOffset(offset);
     try {
-      const data = await adminAPI.getMultiWeekSummary(8);
-      setMultiWeekData(data);
+      const data = await adminAPI.getPeriodSummary(periodType, offset);
+      setPeriodData(data);
+      setPeriodHasOlder(data.hasOlder);
+      setPeriodHasNewer(data.hasNewer);
     } catch (err) {
-      console.error('Failed to load multi-week summary:', err);
-      setAdminToast({ type: 'error', message: 'Failed to load multi-week summary' });
+      console.error(`Failed to load ${periodType} summary:`, err);
+      setAdminToast({ type: 'error', message: `Failed to load ${periodType} summary` });
     } finally {
-      setMultiWeekLoading(false);
+      setPeriodLoading(false);
+    }
+  };
+
+  // Load payroll data for a specific week
+  const loadPayroll = async (weekStart = null) => {
+    setPayrollLoading(true);
+    try {
+      // If no weekStart specified, load available weeks first and use the most recent one
+      let targetWeek = weekStart || payrollWeekStart;
+      let weeks = payrollAvailableWeeks;
+
+      if (!targetWeek || weeks.length === 0) {
+        const weeksData = await adminAPI.getAvailableWeeks();
+        weeks = weeksData.weeks || [];
+        setPayrollAvailableWeeks(weeks);
+        if (!targetWeek && weeks.length > 0) {
+          targetWeek = weeks[0].weekStart; // Most recent week with shifts
+        }
+      }
+
+      if (!targetWeek) {
+        setPayrollData(null);
+        setPayrollLoading(false);
+        return;
+      }
+
+      const data = await adminAPI.getPayroll(targetWeek);
+      setPayrollData(data);
+      setPayrollWeekStart(data.week.weekStart);
+    } catch (err) {
+      console.error('Failed to load payroll:', err);
+      setAdminToast({ type: 'error', message: 'Failed to load payroll data' });
+    } finally {
+      setPayrollLoading(false);
+    }
+  };
+
+  // Approve all pending shifts for an employee in payroll view
+  const handlePayrollApproveAll = async (employee) => {
+    const pendingIds = employee.shifts.filter(s => s.status === 'pending_approval').map(s => s.id);
+    if (pendingIds.length === 0) return;
+
+    if (!window.confirm(`Approve ${pendingIds.length} pending shift${pendingIds.length > 1 ? 's' : ''} for ${employee.name}?`)) return;
+
+    try {
+      const result = await adminAPI.batchApproveShifts(pendingIds);
+      setAdminToast({ type: 'success', message: `Approved ${result.approved?.length || pendingIds.length} shifts for ${employee.name}` });
+      loadPayroll(payrollWeekStart);
+    } catch (err) {
+      console.error('Failed to approve shifts:', err);
+      setAdminToast({ type: 'error', message: err.message || 'Failed to approve shifts' });
+    }
+  };
+
+  // Mark all approved shifts as paid for an employee in payroll view
+  const handlePayrollPayEmployee = async (employee) => {
+    if (employee.pendingCount > 0) {
+      setAdminToast({ type: 'error', message: `${employee.pendingCount} shift${employee.pendingCount > 1 ? 's' : ''} still pending. Approve all shifts first.` });
+      return;
+    }
+
+    const approvedIds = employee.shifts.filter(s => s.status === 'approved').map(s => s.id);
+    if (approvedIds.length === 0) return;
+
+    if (!window.confirm(`Mark ${approvedIds.length} shift${approvedIds.length > 1 ? 's' : ''} as paid for ${employee.name}?`)) return;
+
+    try {
+      const result = await adminAPI.batchMarkPaid(approvedIds);
+      setAdminToast({ type: 'success', message: `Marked ${result.marked?.length || approvedIds.length} shifts as paid for ${employee.name}` });
+      loadPayroll(payrollWeekStart);
+    } catch (err) {
+      console.error('Failed to mark paid:', err);
+      setAdminToast({ type: 'error', message: err.message || 'Failed to mark shifts as paid' });
+    }
+  };
+
+  // Pay all employees for the week
+  const handlePayrollPayAll = async () => {
+    if (!payrollData || !payrollData.summary.allApproved) {
+      setAdminToast({ type: 'error', message: 'All shifts must be approved before marking as paid.' });
+      return;
+    }
+
+    const allApprovedIds = payrollData.employees
+      .flatMap(e => e.shifts.filter(s => s.status === 'approved').map(s => s.id));
+    if (allApprovedIds.length === 0) return;
+
+    if (!window.confirm(`Mark ${allApprovedIds.length} shift${allApprovedIds.length > 1 ? 's' : ''} as paid for all employees this week?`)) return;
+
+    try {
+      const result = await adminAPI.batchMarkPaid(allApprovedIds);
+      setAdminToast({ type: 'success', message: `Marked ${result.marked?.length || allApprovedIds.length} shifts as paid` });
+      loadPayroll(payrollWeekStart);
+    } catch (err) {
+      console.error('Failed to pay all:', err);
+      setAdminToast({ type: 'error', message: err.message || 'Failed to mark shifts as paid' });
+    }
+  };
+
+  // Revert approved shifts back to pending for an employee
+  const handlePayrollRevertToPending = async (employee) => {
+    const revertIds = employee.shifts
+      .filter(s => s.status === 'approved' || s.status === 'paid')
+      .map(s => s.id);
+    if (revertIds.length === 0) return;
+
+    if (!window.confirm(`Revert ${revertIds.length} shift${revertIds.length > 1 ? 's' : ''} back to pending for ${employee.name}?`)) return;
+
+    try {
+      const result = await adminAPI.batchUpdateStatus(revertIds, 'pending_approval');
+      setAdminToast({ type: 'success', message: `Reverted ${result.updated?.length || revertIds.length} shifts to pending for ${employee.name}` });
+      loadPayroll(payrollWeekStart);
+    } catch (err) {
+      console.error('Failed to revert shifts:', err);
+      setAdminToast({ type: 'error', message: err.message || 'Failed to revert shifts' });
+    }
+  };
+
+  // Revert paid shifts back to approved for an employee
+  const handlePayrollRevertToApproved = async (employee) => {
+    const paidIds = employee.shifts.filter(s => s.status === 'paid').map(s => s.id);
+    if (paidIds.length === 0) return;
+
+    if (!window.confirm(`Revert ${paidIds.length} paid shift${paidIds.length > 1 ? 's' : ''} back to approved for ${employee.name}?`)) return;
+
+    try {
+      const result = await adminAPI.batchUpdateStatus(paidIds, 'approved');
+      setAdminToast({ type: 'success', message: `Reverted ${result.updated?.length || paidIds.length} shifts to approved for ${employee.name}` });
+      loadPayroll(payrollWeekStart);
+    } catch (err) {
+      console.error('Failed to revert shifts:', err);
+      setAdminToast({ type: 'error', message: err.message || 'Failed to revert shifts' });
+    }
+  };
+
+  // Update individual shift status from payroll view
+  const handlePayrollShiftStatus = async (shiftId, newStatus, empName) => {
+    try {
+      await adminAPI.updateShift(shiftId, { status: newStatus });
+      setAdminToast({ type: 'success', message: `Shift updated to ${newStatus.replace('_', ' ')}` });
+      loadPayroll(payrollWeekStart);
+    } catch (err) {
+      console.error('Failed to update shift status:', err);
+      setAdminToast({ type: 'error', message: err.message || 'Failed to update shift status' });
     }
   };
 
@@ -5531,6 +5925,7 @@ function TimeClock() {
                       if (deleteConfirm.type === 'user') handleDeactivateUser(deleteConfirm.id);
                       else if (deleteConfirm.type === 'shift') handleDeleteShift(deleteConfirm.id);
                       else if (deleteConfirm.type === 'row') handleDeleteRow(deleteConfirm.table, deleteConfirm.id);
+                      else if (deleteConfirm.type === 'invoice') handleDeleteInvoice(deleteConfirm.id);
                     }}
                   >
                     Delete
@@ -5902,9 +6297,13 @@ function TimeClock() {
                     <span className="nav-badge">{pendingCount}</span>
                   )}
                 </button>
-                <button className={`admin-nav-item ${adminSubTab === 'weekly' ? 'active' : ''}`} onClick={() => { setViewingShift(null); setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('weekly'); loadWeeklyView(); }}>
+                <button className={`admin-nav-item ${adminSubTab === 'weekly' ? 'active' : ''}`} onClick={() => { setViewingShift(null); setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('weekly'); if (weeklyPeriodTab === 'daily') { loadWeeklyView(); } else { loadPeriodSummary(); } }}>
                   <span className="nav-icon">📅</span>
                   <span className="nav-label">Weekly View</span>
+                </button>
+                <button className={`admin-nav-item ${adminSubTab === 'payroll' ? 'active' : ''}`} onClick={() => { setViewingShift(null); setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('payroll'); loadPayroll(); }}>
+                  <span className="nav-icon">💰</span>
+                  <span className="nav-label">Payroll</span>
                 </button>
                 <button className={`admin-nav-item ${adminSubTab === 'users' ? 'active' : ''}`} onClick={() => { setViewingShift(null); setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('users'); }}>
                   <span className="nav-icon">👥</span>
@@ -5913,6 +6312,10 @@ function TimeClock() {
                 <button className={`admin-nav-item ${adminSubTab === 'shifts' ? 'active' : ''}`} onClick={() => { setViewingShift(null); setViewingUserPayWeeks(null); setUserPayWeeksData(null); setAdminSubTab('shifts'); }}>
                   <span className="nav-icon">🕐</span>
                   <span className="nav-label">All Shifts</span>
+                </button>
+                <button className={`admin-nav-item ${adminSubTab === 'invoices' ? 'active' : ''}`} onClick={() => { setViewingShift(null); setViewingUserPayWeeks(null); setUserPayWeeksData(null); setViewingInvoice(null); setAdminSubTab('invoices'); loadInvoices(); }}>
+                  <span className="nav-icon">📄</span>
+                  <span className="nav-label">Invoices</span>
                 </button>
               </nav>
             </aside>
@@ -6624,6 +7027,209 @@ function TimeClock() {
           )}
 
           {/* Shifts Sub-Tab */}
+          {adminSubTab === 'payroll' && (
+            <div className="admin-content payroll-view">
+              {payrollLoading && !payrollData ? (
+                <div className="loading-spinner">Loading payroll...</div>
+              ) : payrollData ? (
+                <>
+                  {/* Week Navigation */}
+                  <div className="payroll-header">
+                    <div className="payroll-week-nav">
+                      <button
+                        className="btn-week-nav"
+                        disabled={(() => {
+                          const idx = payrollAvailableWeeks.findIndex(w => w.weekStart === payrollWeekStart);
+                          return idx < 0 || idx >= payrollAvailableWeeks.length - 1;
+                        })()}
+                        onClick={() => {
+                          const idx = payrollAvailableWeeks.findIndex(w => w.weekStart === payrollWeekStart);
+                          if (idx < payrollAvailableWeeks.length - 1) loadPayroll(payrollAvailableWeeks[idx + 1].weekStart);
+                        }}
+                      >
+                        ◀
+                      </button>
+                      <div className="payroll-week-title">
+                        <h2>Week {getWeekNumber(payrollData.week.weekStart)}: {payrollData.week.weekDisplay}</h2>
+                      </div>
+                      <button
+                        className="btn-week-nav"
+                        disabled={(() => {
+                          const idx = payrollAvailableWeeks.findIndex(w => w.weekStart === payrollWeekStart);
+                          return idx <= 0;
+                        })()}
+                        onClick={() => {
+                          const idx = payrollAvailableWeeks.findIndex(w => w.weekStart === payrollWeekStart);
+                          if (idx > 0) loadPayroll(payrollAvailableWeeks[idx - 1].weekStart);
+                        }}
+                      >
+                        ▶
+                      </button>
+                    </div>
+
+                    {/* Summary Bar */}
+                    <div className="payroll-summary">
+                      <div className="payroll-stat">
+                        <span className="payroll-stat-value">{payrollData.summary.totalEmployees}</span>
+                        <span className="payroll-stat-label">Employees</span>
+                      </div>
+                      <div className="payroll-stat">
+                        <span className="payroll-stat-value">{payrollData.summary.totalHours}</span>
+                        <span className="payroll-stat-label">Total Hours</span>
+                      </div>
+                      <div className="payroll-stat">
+                        {payrollData.summary.totalEmployees === 0 ? (
+                          <span className="payroll-stat-value">No shifts</span>
+                        ) : payrollData.summary.totalPending > 0 ? (
+                          <span className="payroll-stat-value payroll-pending">{payrollData.summary.totalPending} pending</span>
+                        ) : payrollData.summary.allPaid ? (
+                          <span className="payroll-stat-value payroll-paid-text">All Paid</span>
+                        ) : (
+                          <span className="payroll-stat-value payroll-approved-text">All Approved</span>
+                        )}
+                        <span className="payroll-stat-label">Status</span>
+                      </div>
+                      <div className="payroll-stat">
+                        {payrollData.summary.allPaid ? (
+                          <span className="payroll-week-paid-badge">Week Paid</span>
+                        ) : payrollData.summary.allApproved ? (
+                          <button className="btn-pay-all" onClick={handlePayrollPayAll}>
+                            Pay All Employees
+                          </button>
+                        ) : (
+                          <span className="payroll-action-blocked">Approve all shifts first</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Employee List */}
+                  {payrollData.employees.length === 0 ? (
+                    <div className="payroll-empty">No shifts found for this week.</div>
+                  ) : (
+                    <div className="payroll-employee-list">
+                      {payrollData.employees.map(emp => {
+                        const isExpanded = expandedPayrollEmployees.has(emp.userId);
+                        return (
+                          <div key={emp.userId} className={`payroll-employee-card${emp.allPaid ? ' employee-paid' : ''}`}>
+                            <div
+                              className="payroll-employee-header"
+                              onClick={() => {
+                                const newSet = new Set(expandedPayrollEmployees);
+                                if (isExpanded) newSet.delete(emp.userId);
+                                else newSet.add(emp.userId);
+                                setExpandedPayrollEmployees(newSet);
+                              }}
+                            >
+                              <div className="payroll-emp-info">
+                                <span className="payroll-emp-name">{emp.name}</span>
+                                <span className="payroll-emp-shifts">{emp.shifts.length} shift{emp.shifts.length !== 1 ? 's' : ''}</span>
+                              </div>
+                              <span className="payroll-emp-hours">{emp.totalHours} hrs</span>
+                              <div className="payroll-emp-status">
+                                {emp.pendingCount > 0 && (
+                                  <span className="payroll-status-badge pending">{emp.pendingCount} pending</span>
+                                )}
+                                {emp.approvedCount > 0 && (
+                                  <span className="payroll-status-badge approved">{emp.approvedCount} approved</span>
+                                )}
+                                {emp.paidCount > 0 && (
+                                  <span className="payroll-status-badge paid">{emp.paidCount} paid</span>
+                                )}
+                              </div>
+                              <div className="payroll-emp-actions" onClick={e => e.stopPropagation()}>
+                                {emp.allPaid && (
+                                  <span className="payroll-paid-stamp">
+                                    Paid {emp.paidAt ? new Date(emp.paidAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
+                                  </span>
+                                )}
+                                {emp.pendingCount > 0 && (
+                                  <button className="btn-payroll-approve" onClick={() => handlePayrollApproveAll(emp)}>
+                                    Approve All
+                                  </button>
+                                )}
+                                {emp.approvedCount > 0 && !emp.allPaid && (
+                                  <button className="btn-payroll-pay" onClick={() => handlePayrollPayEmployee(emp)}>
+                                    Mark as Paid
+                                  </button>
+                                )}
+                                {(emp.paidCount > 0 || emp.approvedCount > 0) && (
+                                  <div className="payroll-revert-toggle-wrapper">
+                                    <button
+                                      className={`btn-icon btn-payroll-revert-toggle${payrollRevertMenuOpen === emp.userId ? ' active' : ''}`}
+                                      title="Revert options"
+                                      onClick={() => setPayrollRevertMenuOpen(payrollRevertMenuOpen === emp.userId ? null : emp.userId)}
+                                    >
+                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>
+                                        <line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>
+                                        <line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>
+                                        <line x1="1" y1="14" x2="7" y2="14"/>
+                                        <line x1="9" y1="8" x2="15" y2="8"/>
+                                        <line x1="17" y1="16" x2="23" y2="16"/>
+                                      </svg>
+                                    </button>
+                                    {payrollRevertMenuOpen === emp.userId && (
+                                      <div className="payroll-revert-dropdown">
+                                        {emp.paidCount > 0 && (
+                                          <button className="btn-payroll-revert" onClick={() => { handlePayrollRevertToApproved(emp); setPayrollRevertMenuOpen(null); }}>
+                                            Revert to Approved
+                                          </button>
+                                        )}
+                                        <button className="btn-payroll-revert" onClick={() => { handlePayrollRevertToPending(emp); setPayrollRevertMenuOpen(null); }}>
+                                          Revert to Pending
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              <span className="expand-icon">{isExpanded ? '▼' : '▶'}</span>
+                            </div>
+
+                            {/* Expanded: individual shifts */}
+                            {isExpanded && (
+                              <div className="payroll-shifts-list">
+                                {emp.shifts.map(shift => (
+                                  <div
+                                    key={shift.id}
+                                    className="payroll-shift-row"
+                                  >
+                                    <span className="shift-date">{new Date(shift.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                                    <span className="shift-times">{formatTime(shift.clockInTime)} - {formatTime(shift.clockOutTime)}</span>
+                                    <span className="shift-hours">{shift.totalHours} hrs</span>
+                                    <select
+                                      className={`payroll-shift-status-select ${shift.status}`}
+                                      value={shift.status}
+                                      onClick={e => e.stopPropagation()}
+                                      onChange={e => handlePayrollShiftStatus(shift.id, e.target.value, emp.name)}
+                                    >
+                                      <option value="pending_approval">pending</option>
+                                      <option value="approved">approved</option>
+                                      <option value="rejected">rejected</option>
+                                      <option value="paid">paid</option>
+                                    </select>
+                                  </div>
+                                ))}
+                                <div className="payroll-shift-actions" onClick={e => e.stopPropagation()}>
+                                  <button className="btn-view-details" onClick={() => loadUserPayWeeks(emp.userId)}>
+                                    View Full Details
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="payroll-empty">No payroll data found. Shifts will appear here once employees clock in.</div>
+              )}
+            </div>
+          )}
+
           {adminSubTab === 'shifts' && (
               <div className="admin-content shifts-by-week">
                 <div className="shifts-header-bar">
@@ -6987,65 +7593,102 @@ function TimeClock() {
           {/* Weekly View Sub-Tab */}
           {adminSubTab === 'weekly' && (
             <div className="admin-content">
-                  {/* View Mode Toggle: Daily vs Multi-Week */}
-                  <div className="weekly-mode-toggle">
-                    <button
-                      className={`weekly-mode-btn ${!weeklyMultiWeekMode ? 'active' : ''}`}
-                      onClick={() => setWeeklyMultiWeekMode(false)}
-                    >
-                      Daily
-                    </button>
-                    <button
-                      className={`weekly-mode-btn ${weeklyMultiWeekMode ? 'active' : ''}`}
-                      onClick={() => {
-                        setWeeklyMultiWeekMode(true);
-                        if (!multiWeekData) loadMultiWeekSummary();
-                      }}
-                    >
-                      Multi-Week
-                    </button>
+                  {/* Period Tabs: Daily, Weekly, Monthly, Quarterly, Bi-Annual */}
+                  <div className="weekly-period-tabs">
+                    {[
+                      { key: 'daily', label: 'Daily' },
+                      { key: 'weekly', label: 'Weekly' },
+                      { key: 'monthly', label: 'Monthly' },
+                      { key: 'quarterly', label: 'Quarterly' },
+                      { key: 'biannual', label: 'Bi-Annual' }
+                    ].map(tab => (
+                      <button
+                        key={tab.key}
+                        className={`weekly-period-tab ${weeklyPeriodTab === tab.key ? 'active' : ''}`}
+                        onClick={() => {
+                          setWeeklyPeriodTab(tab.key);
+                          if (tab.key === 'daily') {
+                            if (!weeklyViewData) loadWeeklyView();
+                          } else {
+                            setPeriodOffset(0);
+                            loadPeriodSummary(tab.key, 0);
+                          }
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
                   </div>
 
-                  {/* Multi-Week Overview */}
-                  {weeklyMultiWeekMode ? (
-                    multiWeekLoading ? (
-                      <p className="loading-text">Loading multi-week summary...</p>
-                    ) : multiWeekData ? (
+                  {/* Period Grid View (weekly/monthly/quarterly/biannual) */}
+                  {weeklyPeriodTab !== 'daily' ? (
+                    periodLoading ? (
+                      <p className="loading-text">Loading {weeklyPeriodTab} summary...</p>
+                    ) : periodData ? (
                       <div className="multi-week-container">
-                        <div className="multi-week-grid" style={{ '--mw-cols': multiWeekData.weeks.length }}>
-                          {/* Header row: Employee + week columns */}
+                        {/* Arrow navigation header */}
+                        <div className="period-nav-header">
+                          <button
+                            className={`btn-week-arrow ${!periodHasOlder ? 'disabled' : ''}`}
+                            disabled={!periodHasOlder}
+                            onClick={() => loadPeriodSummary(weeklyPeriodTab, periodOffset + 1)}
+                            title="Older"
+                          >
+                            ◀
+                          </button>
+                          <span className="period-nav-label">
+                            {periodData.periods[0]?.periodDisplay} — {periodData.periods[periodData.periods.length - 1]?.periodDisplay}
+                          </span>
+                          <button
+                            className={`btn-week-arrow ${!periodHasNewer ? 'disabled' : ''}`}
+                            disabled={!periodHasNewer}
+                            onClick={() => loadPeriodSummary(weeklyPeriodTab, periodOffset - 1)}
+                            title="Newer"
+                          >
+                            ▶
+                          </button>
+                        </div>
+
+                        <div className="multi-week-grid" style={{ '--mw-cols': periodData.periods.length }}>
+                          {/* Header row */}
                           <div className="multi-week-header-row">
                             <div className="multi-week-employee-header">Employee</div>
-                            {multiWeekData.weeks.map(week => (
-                              <div key={week.weekStart} className="multi-week-col-header">
-                                <span className="mw-week-num">Wk {getWeekNumber(week.weekStart)}</span>
-                                <span className="mw-week-dates">{week.weekDisplay}</span>
+                            {periodData.periods.map(p => (
+                              <div key={p.periodStart} className="multi-week-col-header">
+                                {weeklyPeriodTab === 'weekly' ? (
+                                  <>
+                                    <span className="mw-week-num">Wk {getWeekNumber(p.periodStart)}</span>
+                                    <span className="mw-week-dates">{p.periodDisplay}</span>
+                                  </>
+                                ) : (
+                                  <span className="mw-week-num">{p.periodDisplay}</span>
+                                )}
                               </div>
                             ))}
                             <div className="multi-week-col-header multi-week-total-header">Total</div>
                           </div>
 
                           {/* Employee rows */}
-                          {multiWeekData.employees.map(emp => {
+                          {periodData.employees.map(emp => {
                             const empColor = `hsl(${(emp.userId * 137) % 360}, 70%, 50%)`;
                             return (
                               <div key={emp.userId} className={`multi-week-row ${emp.grandTotal === 0 ? 'no-hours' : ''}`}>
                                 <div className="multi-week-employee-cell" style={{ borderLeftColor: empColor }}>
                                   <span className="mw-emp-name">{emp.userName}</span>
                                 </div>
-                                {multiWeekData.weeks.map(week => {
-                                  const entry = emp.weeklyHours[week.weekStart];
+                                {periodData.periods.map(p => {
+                                  const entry = emp.periodHours[p.periodStart];
                                   return (
                                     <div
-                                      key={week.weekStart}
+                                      key={p.periodStart}
                                       className={`multi-week-hours-cell ${entry ? 'has-hours' : ''}`}
                                       onClick={() => {
-                                        if (entry) {
-                                          setWeeklyMultiWeekMode(false);
-                                          loadWeeklyView(week.weekStart);
+                                        if (entry && weeklyPeriodTab === 'weekly') {
+                                          setWeeklyPeriodTab('daily');
+                                          loadWeeklyView(p.periodStart);
                                         }
                                       }}
-                                      style={entry ? { cursor: 'pointer' } : {}}
+                                      style={entry && weeklyPeriodTab === 'weekly' ? { cursor: 'pointer' } : {}}
                                     >
                                       {entry ? (
                                         <>
@@ -7571,6 +8214,207 @@ function TimeClock() {
               </div>
             </div>
           )}
+
+          {adminSubTab === 'invoices' && (
+            <div className="admin-content">
+              <div className="admin-header-bar">
+                <h2 style={{ margin: 0, flex: 1 }}>Invoices</h2>
+              </div>
+
+              {/* Filter Pills */}
+              <div className="shifts-filters" style={{ marginBottom: '16px' }}>
+                <div className="filter-group">
+                  <span className="filter-label">Filter:</span>
+                  <div className="filter-pills">
+                    <button
+                      className={`filter-pill ${invoiceFilter === '' ? 'active' : ''}`}
+                      onClick={() => setInvoiceFilter('')}
+                    >
+                      All
+                    </button>
+                    <button
+                      className={`filter-pill ${invoiceFilter === 'unsent' ? 'active' : ''}`}
+                      onClick={() => setInvoiceFilter('unsent')}
+                    >
+                      Unsent
+                    </button>
+                    <button
+                      className={`filter-pill ${invoiceFilter === 'sent' ? 'active' : ''}`}
+                      onClick={() => setInvoiceFilter('sent')}
+                    >
+                      Sent
+                    </button>
+                    <button
+                      className={`filter-pill ${invoiceFilter === 'unpaid' ? 'active' : ''}`}
+                      onClick={() => setInvoiceFilter('unpaid')}
+                    >
+                      Unpaid
+                    </button>
+                    <button
+                      className={`filter-pill ${invoiceFilter === 'paid' ? 'active' : ''}`}
+                      onClick={() => setInvoiceFilter('paid')}
+                    >
+                      Paid
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {invoicesLoading && invoices.length === 0 ? (
+                <p className="loading-text">Loading invoices...</p>
+              ) : invoices.filter(inv => {
+                if (invoiceFilter === '') return true;
+                if (invoiceFilter === 'unsent') return !inv.sent_at;
+                if (invoiceFilter === 'sent') return !!inv.sent_at;
+                if (invoiceFilter === 'unpaid') return !inv.paid_at;
+                if (invoiceFilter === 'paid') return !!inv.paid_at;
+                return true;
+              }).length === 0 ? (
+                <div className="empty-state">
+                  <p>{invoiceFilter ? `No ${invoiceFilter} invoices` : 'No invoices found'}</p>
+                </div>
+              ) : (
+                <div className="admin-table-container">
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>Invoice #</th>
+                        <th>Date</th>
+                        <th>Company</th>
+                        <th>Job Name</th>
+                        <th>Amount</th>
+                        <th>Sent</th>
+                        <th>Paid</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {invoices
+                        .filter(inv => {
+                          if (invoiceFilter === '') return true;
+                          if (invoiceFilter === 'unsent') return !inv.sent_at;
+                          if (invoiceFilter === 'sent') return !!inv.sent_at;
+                          if (invoiceFilter === 'unpaid') return !inv.paid_at;
+                          if (invoiceFilter === 'paid') return !!inv.paid_at;
+                          return true;
+                        })
+                        .map(inv => (
+                        <React.Fragment key={inv.id}>
+                          <tr className="clickable-row" onClick={() => setViewingInvoice(viewingInvoice?.id === inv.id ? null : inv)}>
+                            <td><strong>{inv.invoice_number}</strong></td>
+                            <td>{inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString('en-US', { timeZone: 'UTC' }) : '-'}</td>
+                            <td>{inv.company_name}</td>
+                            <td>{inv.job_name || '-'}</td>
+                            <td><strong>${Number(inv.invoice_amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong></td>
+                            <td onClick={e => e.stopPropagation()}>
+                              <button
+                                className={`status-badge clickable ${inv.sent_at ? 'sent' : 'unsent'}`}
+                                onClick={() => handleToggleSent(inv.id)}
+                                title={inv.sent_at ? `Sent ${new Date(inv.sent_at).toLocaleDateString()}` : 'Mark as sent'}
+                              >
+                                {inv.sent_at ? 'Sent' : 'Not Sent'}
+                              </button>
+                            </td>
+                            <td onClick={e => e.stopPropagation()}>
+                              <button
+                                className={`status-badge clickable ${inv.paid_at ? 'paid' : 'unpaid'}`}
+                                onClick={() => handleTogglePaid(inv.id)}
+                                title={inv.paid_at ? `Paid ${new Date(inv.paid_at).toLocaleDateString()}` : 'Mark as paid'}
+                              >
+                                {inv.paid_at ? 'Paid' : 'Unpaid'}
+                              </button>
+                            </td>
+                            <td className="action-cell" onClick={e => e.stopPropagation()}>
+                              <button className="btn-icon" onClick={() => generateInvoicePDF(inv)} title="Download PDF">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                  <polyline points="7 10 12 15 17 10"></polyline>
+                                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                              </button>
+                              <button className="btn-icon danger" onClick={() => setDeleteConfirm({ type: 'invoice', id: inv.id })} title="Delete invoice">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <polyline points="3 6 5 6 21 6"></polyline>
+                                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                </svg>
+                              </button>
+                            </td>
+                          </tr>
+                          {viewingInvoice?.id === inv.id && (
+                            <tr className="invoice-detail-row">
+                              <td colSpan="8">
+                                <div className="shift-details-list" style={{ padding: '16px' }}>
+                                  <div className="detail-row">
+                                    <span className="detail-label">Company</span>
+                                    <span className="detail-value">{viewingInvoice.company_name}</span>
+                                  </div>
+                                  <div className="detail-row">
+                                    <span className="detail-label">Address</span>
+                                    <span className="detail-value">{viewingInvoice.company_address || '-'}</span>
+                                  </div>
+                                  <div className="detail-row">
+                                    <span className="detail-label">City/State/Zip</span>
+                                    <span className="detail-value">{viewingInvoice.company_city_state_zip || '-'}</span>
+                                  </div>
+                                  <div className="detail-row">
+                                    <span className="detail-label">Contact</span>
+                                    <span className="detail-value">{viewingInvoice.contact_name || '-'}</span>
+                                  </div>
+                                  <div className="detail-row">
+                                    <span className="detail-label">Job Name</span>
+                                    <span className="detail-value">{viewingInvoice.job_name || '-'}</span>
+                                  </div>
+                                  <div className="detail-row">
+                                    <span className="detail-label">Previous RCV</span>
+                                    <span className="detail-value">${Number(viewingInvoice.previous_rcv).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                                  </div>
+                                  <div className="detail-row">
+                                    <span className="detail-label">Current RCV</span>
+                                    <span className="detail-value">${Number(viewingInvoice.current_rcv).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                                  </div>
+                                  <div className="detail-row">
+                                    <span className="detail-label">Difference</span>
+                                    <span className="detail-value">${Number(viewingInvoice.difference).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                                  </div>
+                                  <div className="detail-row">
+                                    <span className="detail-label">Invoice Amount (10%)</span>
+                                    <span className="detail-value" style={{ fontWeight: 'bold', color: '#10b981' }}>${Number(viewingInvoice.invoice_amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                                  </div>
+                                  {viewingInvoice.sent_at && (
+                                    <div className="detail-row">
+                                      <span className="detail-label">Sent At</span>
+                                      <span className="detail-value">{new Date(viewingInvoice.sent_at).toLocaleString()}</span>
+                                    </div>
+                                  )}
+                                  {viewingInvoice.paid_at && (
+                                    <div className="detail-row">
+                                      <span className="detail-label">Paid At</span>
+                                      <span className="detail-value">{new Date(viewingInvoice.paid_at).toLocaleString()}</span>
+                                    </div>
+                                  )}
+                                  {viewingInvoice.notes && (
+                                    <div className="detail-row">
+                                      <span className="detail-label">Notes</span>
+                                      <span className="detail-value">{viewingInvoice.notes}</span>
+                                    </div>
+                                  )}
+                                  <div className="detail-row">
+                                    <span className="detail-label">Created</span>
+                                    <span className="detail-value">{new Date(viewingInvoice.created_at).toLocaleString()}</span>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
           </>
           )}
 

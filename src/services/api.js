@@ -446,6 +446,12 @@ export const adminAPI = {
       body: JSON.stringify({ shiftIds }),
     }),
 
+  batchUpdateStatus: (shiftIds, status) =>
+    request('/admin/shifts/batch-update-status', {
+      method: 'POST',
+      body: JSON.stringify({ shiftIds, status }),
+    }),
+
   // Weekly View
   getWeeklyView: (weekStart) => {
     const params = weekStart ? `?weekStart=${weekStart}` : '';
@@ -457,8 +463,15 @@ export const adminAPI = {
     return request(`/admin/users/${userId}/pay-weeks${queryString ? `?${queryString}` : ''}`);
   },
 
-  // Multi-week summary (hours per employee per week)
+  // Multi-week summary (hours per employee per week) - kept for backward compat
   getMultiWeekSummary: (weeks = 8) => request(`/admin/weekly-view/summary?weeks=${weeks}`),
+
+  // Period summary (weekly/monthly/quarterly/biannual grid)
+  getPeriodSummary: (period = 'weekly', offset = 0) =>
+    request(`/admin/weekly-view/summary?period=${period}&offset=${offset}`),
+
+  // Payroll - get all employees' shifts for a specific week
+  getPayroll: (weekStart) => request(`/admin/payroll/${weekStart}`),
 
   // Get available weeks with shifts
   getAvailableWeeks: () => request('/admin/available-weeks'),
@@ -497,6 +510,36 @@ export const notificationsAPI = {
 
   deleteNotification: (id) =>
     request(`/notifications/${id}`, {
+      method: 'DELETE',
+    }),
+};
+
+// Invoices API
+export const invoicesAPI = {
+  getAll: () => request('/invoices'),
+
+  getOne: (id) => request(`/invoices/${id}`),
+
+  getNextNumber: () => request('/invoices/next-number'),
+
+  create: (data) =>
+    request('/invoices', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  toggleSent: (id) =>
+    request(`/invoices/${id}/sent`, {
+      method: 'PATCH',
+    }),
+
+  togglePaid: (id) =>
+    request(`/invoices/${id}/paid`, {
+      method: 'PATCH',
+    }),
+
+  delete: (id) =>
+    request(`/invoices/${id}`, {
       method: 'DELETE',
     }),
 };

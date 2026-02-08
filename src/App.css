@@ -5366,6 +5366,31 @@ html, body {
   color: white;
 }
 
+.status-badge.sent {
+  background: #3b82f6;
+  color: white;
+}
+
+.status-badge.unsent {
+  background: #e5e7eb;
+  color: #6b7280;
+}
+
+.status-badge.unpaid {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-badge.cancelled {
+  background: #6b7280;
+  color: white;
+}
+
+.invoice-detail-row td {
+  background: #f8f9fa;
+  border-top: none;
+}
+
 /* Pending Approval Tab Styles */
 .pending-header {
   display: flex;
@@ -5744,6 +5769,11 @@ html, body {
 
 .btn-week-nav:hover {
   background: #1e293b;
+}
+
+.btn-week-nav:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .btn-week-nav.btn-weeks {
@@ -6643,6 +6673,465 @@ html, body {
 .week-hours {
   font-weight: 600;
   color: #22c55e;
+}
+
+.week-actions {
+  display: flex;
+  align-items: center;
+}
+
+.btn-pay-week {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-pay-week:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(16, 185, 129, 0.35);
+}
+
+.week-paid-timestamp {
+  color: #10b981;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pay-week-header.week-paid {
+  background: #f0fdf4;
+}
+
+.pay-week-header.week-paid:hover {
+  background: #ecfdf5;
+}
+
+/* ============================================ */
+/* Payroll View                                 */
+/* ============================================ */
+
+.payroll-view {
+  padding: 0;
+}
+
+.payroll-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid #e2e8f0;
+  background: white;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.payroll-week-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.payroll-week-nav h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: #1e293b;
+  text-align: center;
+  min-width: 260px;
+}
+
+.payroll-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+}
+
+.payroll-stat {
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 2px;
+}
+
+.payroll-stat-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.payroll-stat-label {
+  font-size: 0.75rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.payroll-pending {
+  color: #f59e0b;
+}
+
+.payroll-paid-text {
+  color: #10b981;
+}
+
+.payroll-approved-text {
+  color: #3b82f6;
+}
+
+.btn-pay-all {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border: none;
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-pay-all:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.35);
+}
+
+.payroll-week-paid-badge {
+  background: #10b981;
+  color: white;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.payroll-action-blocked {
+  color: #94a3b8;
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.payroll-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: #94a3b8;
+  font-size: 1rem;
+}
+
+.payroll-employee-list {
+  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.payroll-employee-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.payroll-employee-card:hover {
+  border-color: #cbd5e1;
+}
+
+.payroll-employee-card.employee-paid {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.payroll-employee-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.payroll-employee-header:hover {
+  background: #f8fafc;
+}
+
+.payroll-employee-card.employee-paid .payroll-employee-header:hover {
+  background: #ecfdf5;
+}
+
+.payroll-emp-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+}
+
+.payroll-emp-name {
+  font-weight: 600;
+  color: #1e293b;
+  font-size: 0.95rem;
+}
+
+.payroll-emp-shifts {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.payroll-emp-hours {
+  font-weight: 700;
+  font-size: 1rem;
+  color: #1e293b;
+  min-width: 70px;
+  text-align: right;
+}
+
+.payroll-emp-status {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+
+.payroll-status-badge {
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.payroll-status-badge.pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.payroll-status-badge.approved {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.payroll-status-badge.paid {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.payroll-emp-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 130px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.btn-payroll-approve {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: white;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-payroll-approve:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(59, 130, 246, 0.35);
+}
+
+.btn-payroll-pay {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-payroll-pay:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(16, 185, 129, 0.35);
+}
+
+.payroll-paid-stamp {
+  color: #10b981;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.btn-payroll-revert {
+  padding: 6px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.btn-payroll-revert:hover {
+  background: #fff7ed;
+  border-color: #f97316;
+  color: #ea580c;
+}
+
+.payroll-revert-toggle-wrapper {
+  position: relative;
+}
+
+.btn-payroll-revert-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-payroll-revert-toggle:hover,
+.btn-payroll-revert-toggle.active {
+  background: #fff7ed;
+  border-color: #f97316;
+  color: #ea580c;
+}
+
+.payroll-revert-dropdown {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  z-index: 10;
+  white-space: nowrap;
+}
+
+.payroll-shifts-list {
+  border-top: 1px solid #e2e8f0;
+  padding: 12px 16px;
+  background: #f8fafc;
+}
+
+.payroll-shift-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+
+.payroll-shift-row:hover {
+  background: #f1f5f9;
+}
+
+.payroll-shift-row .shift-date {
+  min-width: 120px;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.payroll-shift-row .shift-times {
+  min-width: 150px;
+  font-size: 0.85rem;
+  color: #1e293b;
+}
+
+.payroll-shift-row .shift-hours {
+  min-width: 60px;
+  text-align: right;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #1e293b;
+}
+
+.payroll-shift-status-select {
+  padding: 4px 8px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.15s;
+  margin-left: auto;
+}
+
+.payroll-shift-status-select.pending_approval {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fcd34d;
+}
+
+.payroll-shift-status-select.approved {
+  background: #d1fae5;
+  color: #065f46;
+  border-color: #6ee7b7;
+}
+
+.payroll-shift-status-select.paid {
+  background: #dbeafe;
+  color: #1e40af;
+  border-color: #93c5fd;
+}
+
+.payroll-shift-status-select.rejected {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+.payroll-shift-actions {
+  padding: 8px 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-view-details {
+  background: none;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-view-details:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
 }
 
 .expand-icon {
