@@ -180,6 +180,10 @@ function TimeClock() {
 
   const [viewingInvoice, setViewingInvoice] = useState(null);
   const [invoiceFilter, setInvoiceFilter] = useState('');
+  const [invoiceSelectMode, setInvoiceSelectMode] = useState(false);
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState(new Set());
+  const [invoiceBatchDropdown, setInvoiceBatchDropdown] = useState(false);
+  const [showInvoiceBatchDeleteConfirm, setShowInvoiceBatchDeleteConfirm] = useState(false);
   const [currentDate, setCurrentDate] = useState(() => {
     const now = new Date();
     const year = now.getFullYear();
@@ -689,6 +693,66 @@ function TimeClock() {
       setInvoices(prev => prev.map(inv => inv.id === invoiceId ? updated : inv));
     } catch (err) {
       setAdminToast({ type: 'error', message: err.message || 'Failed to update paid status' });
+    }
+  };
+
+  const toggleInvoiceSelection = (id) => {
+    setSelectedInvoiceIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBatchInvoiceSetSent = async () => {
+    if (selectedInvoiceIds.size === 0) return;
+    try {
+      for (const id of selectedInvoiceIds) {
+        const inv = invoices.find(i => i.id === id);
+        if (inv && !inv.sent_at) await invoicesAPI.toggleSent(id);
+      }
+      setAdminToast({ type: 'success', message: `Marked ${selectedInvoiceIds.size} invoices as sent` });
+      setInvoiceSelectMode(false);
+      setSelectedInvoiceIds(new Set());
+      setInvoiceBatchDropdown(false);
+      loadInvoices();
+    } catch (err) {
+      setAdminToast({ type: 'error', message: err.message || 'Failed to update invoices' });
+    }
+  };
+
+  const handleBatchInvoiceSetPaid = async () => {
+    if (selectedInvoiceIds.size === 0) return;
+    try {
+      for (const id of selectedInvoiceIds) {
+        const inv = invoices.find(i => i.id === id);
+        if (inv && !inv.paid_at) await invoicesAPI.togglePaid(id);
+      }
+      setAdminToast({ type: 'success', message: `Marked ${selectedInvoiceIds.size} invoices as paid` });
+      setInvoiceSelectMode(false);
+      setSelectedInvoiceIds(new Set());
+      setInvoiceBatchDropdown(false);
+      loadInvoices();
+    } catch (err) {
+      setAdminToast({ type: 'error', message: err.message || 'Failed to update invoices' });
+    }
+  };
+
+  const handleBatchInvoiceDelete = async () => {
+    if (selectedInvoiceIds.size === 0) return;
+    try {
+      for (const id of selectedInvoiceIds) {
+        await invoicesAPI.delete(id);
+      }
+      setAdminToast({ type: 'success', message: `Deleted ${selectedInvoiceIds.size} invoices` });
+      setShowInvoiceBatchDeleteConfirm(false);
+      setInvoiceSelectMode(false);
+      setSelectedInvoiceIds(new Set());
+      setInvoiceBatchDropdown(false);
+      loadInvoices();
+    } catch (err) {
+      setAdminToast({ type: 'error', message: err.message || 'Failed to delete invoices' });
     }
   };
 
@@ -5961,6 +6025,31 @@ function TimeClock() {
             </div>
           )}
 
+          {showInvoiceBatchDeleteConfirm && (
+            <div className="modal-overlay" onClick={() => setShowInvoiceBatchDeleteConfirm(false)}>
+              <div className="preview-modal delete-modal" onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                  <h2>Delete {selectedInvoiceIds.size} Invoices</h2>
+                  <button className="modal-close" onClick={() => setShowInvoiceBatchDeleteConfirm(false)}>&times;</button>
+                </div>
+                <div className="modal-body">
+                  <p className="delete-warning">
+                    You are about to delete <strong>{selectedInvoiceIds.size}</strong> invoices. This action cannot be undone.
+                  </p>
+                </div>
+                <div className="modal-footer">
+                  <button className="btn-cancel-modal" onClick={() => setShowInvoiceBatchDeleteConfirm(false)}>Cancel</button>
+                  <button
+                    className="btn-delete-confirm"
+                    onClick={handleBatchInvoiceDelete}
+                  >
+                    Delete All
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Edit User Modal */}
           {editingUser && (
             <div className="modal-overlay" onClick={() => setEditingUser(null)}>
@@ -7198,17 +7287,44 @@ function TimeClock() {
                                     <span className="shift-date">{new Date(shift.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
                                     <span className="shift-times">{formatTime(shift.clockInTime)} - {formatTime(shift.clockOutTime)}</span>
                                     <span className="shift-hours">{shift.totalHours} hrs</span>
-                                    <select
-                                      className={`payroll-shift-status-select ${shift.status}`}
-                                      value={shift.status}
-                                      onClick={e => e.stopPropagation()}
-                                      onChange={e => handlePayrollShiftStatus(shift.id, e.target.value, emp.name)}
-                                    >
-                                      <option value="pending_approval">pending</option>
-                                      <option value="approved">approved</option>
-                                      <option value="rejected">rejected</option>
-                                      <option value="paid">paid</option>
-                                    </select>
+                                    <div className="status-dropdown-container" onClick={e => e.stopPropagation()}>
+                                      {['approved', 'pending_approval', 'paid'].includes(shift.status) ? (
+                                        <>
+                                          <button
+                                            className={`status-badge clickable ${shift.status}`}
+                                            onClick={() => setStatusDropdownShiftId(statusDropdownShiftId === shift.id ? null : shift.id)}
+                                          >
+                                            {shift.status.replace('_', ' ')} <span className="status-arrow">▾</span>
+                                          </button>
+                                          {statusDropdownShiftId === shift.id && (
+                                            <div className="status-dropdown">
+                                              {shift.status === 'approved' && (
+                                                <button className="status-dropdown-item paid" onClick={() => { handlePayrollShiftStatus(shift.id, 'paid', emp.name); setStatusDropdownShiftId(null); }}>
+                                                  Mark as Paid
+                                                </button>
+                                              )}
+                                              {shift.status === 'paid' && (
+                                                <button className="status-dropdown-item approved" onClick={() => { handlePayrollShiftStatus(shift.id, 'approved', emp.name); setStatusDropdownShiftId(null); }}>
+                                                  Revert to Approved
+                                                </button>
+                                              )}
+                                              {shift.status === 'pending_approval' && (
+                                                <>
+                                                  <button className="status-dropdown-item approved" onClick={() => { handlePayrollShiftStatus(shift.id, 'approved', emp.name); setStatusDropdownShiftId(null); }}>
+                                                    Approve
+                                                  </button>
+                                                  <button className="status-dropdown-item danger" onClick={() => { handlePayrollShiftStatus(shift.id, 'rejected', emp.name); setStatusDropdownShiftId(null); }}>
+                                                    Reject
+                                                  </button>
+                                                </>
+                                              )}
+                                            </div>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <span className={`status-badge ${shift.status}`}>{shift.status.replace('_', ' ')}</span>
+                                      )}
+                                    </div>
                                   </div>
                                 ))}
                                 <div className="payroll-shift-actions" onClick={e => e.stopPropagation()}>
@@ -8219,7 +8335,54 @@ function TimeClock() {
             <div className="admin-content">
               <div className="admin-header-bar">
                 <h2 style={{ margin: 0, flex: 1 }}>Invoices</h2>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <button
+                    className="btn-select-mode"
+                    onClick={() => {
+                      if (invoiceSelectMode) {
+                        setInvoiceSelectMode(false);
+                        setSelectedInvoiceIds(new Set());
+                        setInvoiceBatchDropdown(false);
+                      } else {
+                        setInvoiceSelectMode(true);
+                      }
+                    }}
+                  >
+                    {invoiceSelectMode ? 'Cancel' : 'Select'}
+                  </button>
+                </div>
               </div>
+
+              {/* Batch action bar */}
+              {invoiceSelectMode && selectedInvoiceIds.size > 0 && (
+                <div className="batch-action-bar">
+                  <span className="selected-count">{selectedInvoiceIds.size} selected</span>
+                  <button className="btn-batch-paid" onClick={handleBatchInvoiceSetSent}>
+                    Mark as Sent
+                  </button>
+                  <button className="btn-batch-paid" onClick={handleBatchInvoiceSetPaid}>
+                    Mark as Paid
+                  </button>
+                  <div className="batch-dropdown-container">
+                    <button
+                      className="btn-batch-more"
+                      onClick={() => setInvoiceBatchDropdown(!invoiceBatchDropdown)}
+                    >
+                      More ▾
+                    </button>
+                    {invoiceBatchDropdown && (
+                      <div className="batch-dropdown">
+                        <button
+                          className="batch-dropdown-item danger"
+                          onClick={() => setShowInvoiceBatchDeleteConfirm(true)}
+                        >
+                          Delete Selected
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Filter Pills */}
               <div className="shifts-filters" style={{ marginBottom: '16px' }}>
@@ -8278,6 +8441,7 @@ function TimeClock() {
                   <table className="admin-table">
                     <thead>
                       <tr>
+                        <th className="checkbox-col"></th>
                         <th>Invoice #</th>
                         <th>Date</th>
                         <th>Company</th>
@@ -8300,7 +8464,19 @@ function TimeClock() {
                         })
                         .map(inv => (
                         <React.Fragment key={inv.id}>
-                          <tr className="clickable-row" onClick={() => setViewingInvoice(viewingInvoice?.id === inv.id ? null : inv)}>
+                          <tr
+                            className={`clickable-row${selectedInvoiceIds.has(inv.id) ? ' selected-row' : ''}`}
+                            onClick={() => invoiceSelectMode ? toggleInvoiceSelection(inv.id) : setViewingInvoice(viewingInvoice?.id === inv.id ? null : inv)}
+                          >
+                            <td className="checkbox-col" onClick={e => e.stopPropagation()}>
+                              {invoiceSelectMode && (
+                                <input
+                                  type="checkbox"
+                                  checked={selectedInvoiceIds.has(inv.id)}
+                                  onChange={() => toggleInvoiceSelection(inv.id)}
+                                />
+                              )}
+                            </td>
                             <td><strong>{inv.invoice_number}</strong></td>
                             <td>{inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString('en-US', { timeZone: 'UTC' }) : '-'}</td>
                             <td>{inv.company_name}</td>
@@ -8342,7 +8518,7 @@ function TimeClock() {
                           </tr>
                           {viewingInvoice?.id === inv.id && (
                             <tr className="invoice-detail-row">
-                              <td colSpan="8">
+                              <td colSpan="9">
                                 <div className="shift-details-list" style={{ padding: '16px' }}>
                                   <div className="detail-row">
                                     <span className="detail-label">Company</span>
