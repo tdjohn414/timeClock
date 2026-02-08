@@ -6,7 +6,8 @@ html, body {
 
 .app {
   overflow-x: hidden;
-  max-width: 80vw;
+  max-width: 1400px;
+  width: 100%;
   margin: 0 auto;
   padding: 20px 24px;
   font-family: 'Inter', sans-serif;
@@ -559,11 +560,13 @@ html, body {
 }
 
 .time-select.hour-select {
-  width: 54px;
+  width: 60px;
+  min-height: 44px;
 }
 
 .time-select.minute-select {
-  width: 54px;
+  width: 60px;
+  min-height: 44px;
 }
 
 .time-select.locked-input {
@@ -595,6 +598,7 @@ html, body {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s;
+  min-height: 44px;
 }
 
 .period-btn:first-child {
@@ -4481,7 +4485,8 @@ html, body {
 /* ==================== SHIFT DETAIL PAGE ==================== */
 
 .shift-detail-page {
-  width: 1100px;
+  max-width: 1100px;
+  width: 100%;
   margin: 0 auto;
 }
 
@@ -5422,7 +5427,7 @@ html, body {
 }
 
 .pending-shift-card {
-  background: linear-gradient(45deg, #f0f5ff, transparent);
+  background: #f0f5ff;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 16px;
@@ -5691,13 +5696,12 @@ html, body {
   display: flex;
   align-items: center;
   margin-bottom: 20px;
-  position: relative;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .weekly-header .btn-week-nav {
-  position: absolute;
-  left: 0;
-  z-index: 1;
+  flex-shrink: 0;
 }
 
 .weekly-header h3 {
@@ -5711,6 +5715,14 @@ html, body {
   align-items: center;
   justify-content: center;
   gap: 12px;
+  min-width: 0;
+}
+
+.week-nav-controls h3 {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .btn-week-arrow {
@@ -6150,9 +6162,8 @@ html, body {
   font-size: 0.85rem;
   font-weight: 500;
   color: #1e293b;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .sidebar-employee .emp-hours {
@@ -6190,7 +6201,7 @@ html, body {
   grid-template-columns: repeat(7, 1fr);
   border-bottom: 2px solid #cbd5e1;
   background: #f8fafc;
-  min-width: 700px;
+  min-width: 490px;
   height: 52px;
   box-sizing: border-box;
 }
@@ -6223,8 +6234,9 @@ html, body {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   border-bottom: 1px solid #cbd5e1;
-  min-width: 700px;
-  height: 64px;
+  min-width: 490px;
+  min-height: 64px;
+  height: auto;
   box-sizing: border-box;
 }
 
@@ -6253,15 +6265,16 @@ html, body {
 }
 
 .shift-bar {
-  padding: 6px 8px;
+  padding: 4px 6px;
   border-radius: 6px;
   cursor: pointer;
   transition: transform 0.2s, box-shadow 0.2s;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   width: 100%;
   justify-content: center;
+  flex-wrap: wrap;
   box-shadow: 0 1px 3px rgba(0,0,0,0.15);
 }
 
@@ -6278,8 +6291,10 @@ html, body {
 }
 
 .shift-bar .shift-dash {
-  font-size: 0.65rem;
-  color: rgba(255,255,255,0.8);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.9);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
 }
 
 /* Shift bar status colors - override inline styles */
@@ -6407,8 +6422,8 @@ html, body {
   font-weight: 600;
   font-size: 0.95rem;
   color: #334155;
-  min-width: 200px;
   text-align: center;
+  white-space: nowrap;
 }
 
 @media (max-width: 480px) {
@@ -6421,8 +6436,8 @@ html, body {
     font-size: 0.8rem;
   }
   .period-nav-label {
-    min-width: unset;
     font-size: 0.85rem;
+    white-space: normal;
   }
 }
 
@@ -6510,9 +6525,8 @@ html, body {
   font-size: 0.85rem;
   font-weight: 500;
   color: #334155;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .multi-week-hours-cell {
@@ -7452,4 +7466,801 @@ html, body {
 .info-tooltip-wrapper:hover .info-tooltip {
   opacity: 1;
   visibility: visible;
+}
+
+/* ============================================
+   UTILITY CLASSES (for App.js inline style replacements)
+   ============================================ */
+
+.create-shift-modal {
+  max-width: 700px;
+  max-height: 90vh;
+  overflow: auto;
+}
+
+.form-two-column {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* ============================================
+   RESPONSIVE: TABLET (max-width: 1023px)
+   ============================================ */
+@media (max-width: 1023px) {
+  .app {
+    padding: 16px 16px;
+  }
+
+  .main-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .completed-column {
+    position: static;
+    max-height: none;
+  }
+
+  .header-top {
+    flex-direction: column;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  .header-right {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .tab-nav {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .tab-btn {
+    padding: 10px 16px;
+    font-size: 0.9rem;
+  }
+
+  .admin-sub-nav {
+    flex-wrap: wrap;
+  }
+
+  .admin-sub-tab {
+    flex: 1;
+    min-width: 80px;
+    padding: 8px 12px;
+    font-size: 0.8rem;
+    text-align: center;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .dashboard-sections {
+    grid-template-columns: 1fr;
+  }
+
+  .pending-shifts-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .shift-detail-two-column {
+    grid-template-columns: 1fr;
+  }
+
+  .user-details-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .user-info-column {
+    position: static;
+  }
+
+  .payroll-summary {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .payroll-employee-header {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .payroll-emp-actions {
+    min-width: auto;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .pay-week-shift-row {
+    grid-template-columns: 100px 1fr 70px 80px;
+    gap: 8px;
+    font-size: 0.85rem;
+  }
+
+  .filters-bar {
+    flex-direction: column;
+  }
+
+  .filters-bar input,
+  .filters-bar select,
+  .filters-bar button {
+    width: 100%;
+  }
+
+  .export-buttons {
+    flex-direction: column;
+  }
+
+  .btn-export {
+    width: 100%;
+  }
+
+  .db-browser {
+    grid-template-columns: 1fr;
+  }
+
+  .db-sidebar {
+    order: 2;
+  }
+
+  .db-content {
+    order: 1;
+  }
+
+  .create-shift-modal {
+    max-width: 95%;
+  }
+
+  .form-two-column {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+}
+
+/* ============================================
+   RESPONSIVE: MOBILE (max-width: 767px)
+   ============================================ */
+@media (max-width: 767px) {
+  .app {
+    padding: 12px 12px;
+  }
+
+  /* ---- HEADER ---- */
+  .header {
+    margin-bottom: 12px;
+  }
+
+  .header-top {
+    flex-direction: column;
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  .header-right {
+    width: 100%;
+    gap: 8px;
+  }
+
+  .user-info {
+    font-size: 0.8rem;
+    gap: 6px;
+  }
+
+  .logo-company {
+    font-size: 0.75rem;
+  }
+
+  .logo-app {
+    font-size: 1rem;
+  }
+
+  /* ---- TAB NAVIGATION ---- */
+  .tab-nav {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+    gap: 0;
+    margin-bottom: 12px;
+    scrollbar-width: none;
+  }
+
+  .tab-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tab-btn {
+    padding: 10px 14px;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* ---- MAIN GRID (Today's Shift) ---- */
+  .main-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .input-column {
+    padding: 16px;
+  }
+
+  .section-header {
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+  }
+
+  .section-header h2 {
+    font-size: 1rem;
+  }
+
+  .completed-column {
+    position: static;
+    max-height: none;
+    padding: 12px;
+  }
+
+  .time-block {
+    padding: 14px;
+  }
+
+  .block-header {
+    margin-bottom: 10px;
+    gap: 8px;
+  }
+
+  .block-times {
+    gap: 10px;
+  }
+
+  .time-picker-group {
+    gap: 3px;
+  }
+
+  .time-select {
+    min-height: 44px;
+    padding: 10px 6px;
+    font-size: 1rem;
+  }
+
+  .time-select.hour-select,
+  .time-select.minute-select {
+    width: 56px;
+    min-height: 44px;
+  }
+
+  .period-btn {
+    min-height: 44px;
+    padding: 10px 8px;
+  }
+
+  .btn-now {
+    min-height: 44px;
+    padding: 10px 12px;
+  }
+
+  .btn-clock-in {
+    width: 100%;
+    padding: 16px;
+    font-size: 1.05rem;
+  }
+
+  .btn-break,
+  .btn-pause,
+  .btn-resume,
+  .btn-cancel-pause {
+    min-height: 44px;
+    padding: 12px 14px;
+  }
+
+  .shift-summary {
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+  }
+
+  .shift-summary-actions {
+    justify-content: center;
+  }
+
+  /* ---- MODALS ---- */
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .preview-modal {
+    width: 100%;
+    max-width: 100%;
+    max-height: 95vh;
+    border-radius: 12px 12px 0 0;
+    margin: auto 0 0 0;
+  }
+
+  .modal {
+    width: 95%;
+    max-width: 95%;
+  }
+
+  .modal-header {
+    padding: 16px;
+  }
+
+  .modal-header h2 {
+    font-size: 1.05rem;
+  }
+
+  .modal-body {
+    padding: 16px;
+  }
+
+  .modal-footer {
+    padding: 12px 16px;
+    flex-wrap: wrap;
+  }
+
+  .modal-footer button {
+    flex: 1;
+    min-width: 120px;
+    min-height: 44px;
+  }
+
+  .modal-actions {
+    flex-wrap: wrap;
+  }
+
+  .modal-actions button {
+    min-height: 44px;
+  }
+
+  .create-shift-modal {
+    max-width: 100%;
+    max-height: 95vh;
+  }
+
+  .form-two-column {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .activity-modal {
+    max-width: 95%;
+  }
+
+  .gap-modal-full {
+    max-width: 95%;
+  }
+
+  .gap-modal-full .gap-times {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .gap-modal-full .preset-tasks-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cancel-shift-modal {
+    max-width: 95%;
+  }
+
+  .recovery-footer {
+    flex-direction: column;
+  }
+
+  .recovery-footer button {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  /* ---- HISTORY TAB ---- */
+  .history-tab {
+    padding: 0 4px;
+  }
+
+  .history-item {
+    padding: 10px 12px;
+  }
+
+  .history-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .history-header-left {
+    gap: 8px;
+  }
+
+  .history-date {
+    font-size: 0.9rem;
+  }
+
+  .history-times-inline {
+    font-size: 0.8rem;
+  }
+
+  .history-hours {
+    font-size: 0.8rem;
+    padding: 4px 10px;
+  }
+
+  .task-time {
+    min-width: 100px;
+    font-size: 0.8rem;
+  }
+
+  .history-task {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .history-week-group .week-header {
+    padding: 12px 12px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .history-week-group .week-header .week-display {
+    font-size: 0.9rem;
+  }
+
+  /* ---- NOTIFICATION DROPDOWN ---- */
+  .notification-dropdown {
+    width: calc(100vw - 24px);
+    max-width: 320px;
+    right: -60px;
+  }
+
+  /* ---- USER DROPDOWN ---- */
+  .user-dropdown {
+    right: 0;
+    min-width: 200px;
+  }
+
+  /* ---- ADMIN PANEL ---- */
+  .admin-layout {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .admin-sidebar {
+    width: 100%;
+    position: static;
+  }
+
+  .admin-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .admin-nav-item {
+    flex: 1;
+    min-width: 60px;
+    justify-content: center;
+    padding: 10px 8px;
+  }
+
+  .admin-nav-item .nav-label {
+    display: none;
+  }
+
+  .admin-nav-item .nav-icon {
+    font-size: 1.3rem;
+  }
+
+  .admin-content {
+    padding: 16px;
+  }
+
+  .admin-right-sidebar {
+    display: none;
+  }
+
+  .admin-table {
+    font-size: 0.75rem;
+  }
+
+  .admin-table th,
+  .admin-table td {
+    padding: 8px 6px;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .stat-card {
+    padding: 14px;
+  }
+
+  .stat-value {
+    font-size: 1.5rem;
+  }
+
+  .pending-shifts-list {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .shift-detail-panel {
+    width: 100vw;
+    max-width: 100vw;
+  }
+
+  /* ---- PAYROLL ---- */
+  .payroll-header {
+    padding: 14px 12px;
+  }
+
+  .payroll-week-nav {
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .payroll-week-nav h2 {
+    font-size: 1rem;
+    min-width: auto;
+    text-align: center;
+    width: 100%;
+    order: -1;
+  }
+
+  .payroll-summary {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .payroll-stat {
+    min-width: calc(50% - 8px);
+  }
+
+  .payroll-employee-list {
+    padding: 12px;
+    gap: 8px;
+  }
+
+  .payroll-employee-header {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .payroll-emp-info {
+    min-width: 100px;
+  }
+
+  .payroll-emp-actions {
+    min-width: auto;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .payroll-shift-row {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .payroll-shift-row .shift-date {
+    min-width: auto;
+  }
+
+  .payroll-shift-row .shift-times {
+    min-width: auto;
+  }
+
+  .payroll-shift-row .shift-hours {
+    min-width: auto;
+  }
+
+  .pay-week-shift-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    font-size: 0.85rem;
+  }
+
+  /* ---- WEEKLY VIEW ---- */
+  .weekly-period-tabs {
+    width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .weekly-period-tab {
+    padding: 8px 12px;
+    font-size: 0.8rem;
+  }
+
+  .period-nav-label {
+    font-size: 0.85rem;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.3;
+  }
+
+  .period-nav-header {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .weekly-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .weekly-header .btn-week-nav {
+    width: 100%;
+    text-align: center;
+  }
+
+  .week-nav-controls h3 {
+    font-size: 0.95rem;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .weekly-sidebar {
+    width: 120px;
+    min-width: 120px;
+  }
+
+  .sidebar-employee {
+    padding: 8px 8px;
+  }
+
+  .sidebar-employee .emp-name {
+    font-size: 0.78rem;
+  }
+
+  .calendar-header-row,
+  .calendar-employee-row {
+    min-width: 420px;
+  }
+
+  .shift-bar .shift-time {
+    font-size: 0.6rem;
+  }
+
+  .shift-bar .shift-dash {
+    font-size: 0.6rem;
+  }
+
+  .multi-week-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .multi-week-grid {
+    min-width: 400px;
+  }
+
+  .multi-week-header-row,
+  .multi-week-row {
+    grid-template-columns: 100px repeat(var(--mw-cols), 1fr) 60px;
+  }
+
+  .mw-emp-name {
+    font-size: 0.75rem;
+  }
+
+  .leaderboard-week-nav {
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .leaderboard-week-nav h3.week-range {
+    font-size: 0.95rem;
+    min-width: auto;
+  }
+
+  /* ---- TOOLTIP ---- */
+  .info-tooltip {
+    left: auto;
+    right: 0;
+    max-width: 250px;
+  }
+
+  .info-tooltip::before {
+    left: auto;
+    right: 12px;
+  }
+
+  /* ---- AUTO-SAVE INDICATOR ---- */
+  .auto-save-indicator {
+    bottom: 8px;
+    right: 8px;
+    font-size: 0.8rem;
+    padding: 8px 12px;
+  }
+}
+
+/* ============================================
+   RESPONSIVE: SMALL MOBILE (max-width: 480px)
+   ============================================ */
+@media (max-width: 480px) {
+  .app {
+    padding: 8px 8px;
+  }
+
+  .block-times {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .time-picker-group {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .shift-summary-label {
+    font-size: 0.85rem;
+  }
+
+  .shift-summary-hours {
+    font-size: 1.2rem;
+  }
+
+  .tab-btn {
+    padding: 8px 10px;
+    font-size: 0.8rem;
+  }
+
+  .history-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .history-header-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-overlay {
+    padding: 0;
+  }
+
+  .preview-modal {
+    border-radius: 0;
+    max-height: 100vh;
+    height: 100vh;
+  }
+
+  .pay-week-shift-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .payroll-stat {
+    min-width: 100%;
+  }
+
+  .history-week-group .week-header {
+    padding: 10px;
+  }
+
+  .history-week-group .week-header .week-display {
+    font-size: 0.85rem;
+  }
+
+  .notification-dropdown {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    top: 60px;
+    width: auto;
+    max-width: none;
+  }
 }

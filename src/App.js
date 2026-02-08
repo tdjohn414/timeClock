@@ -6151,7 +6151,7 @@ function TimeClock() {
           {/* Create Shift Modal */}
           {creatingShift && (
             <div className="modal-overlay" onClick={() => setCreatingShift(false)}>
-              <div className="preview-modal edit-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '700px', maxHeight: '90vh', overflow: 'auto' }}>
+              <div className="preview-modal edit-modal create-shift-modal" onClick={e => e.stopPropagation()}>
                 <div className="modal-header">
                   <h2>Create Shift</h2>
                   <button className="modal-close" onClick={() => setCreatingShift(false)}>&times;</button>
@@ -6177,7 +6177,7 @@ function TimeClock() {
                       onChange={e => setNewShiftData({...newShiftData, date: e.target.value})}
                     />
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="form-two-column">
                     <div className="form-field">
                       <label>Clock In *</label>
                       <input
@@ -6255,7 +6255,7 @@ function TimeClock() {
                             )}
                           </div>
                         </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                        <div className="form-two-column" style={{ marginBottom: '8px' }}>
                           <input
                             type="time"
                             value={block.startTime}

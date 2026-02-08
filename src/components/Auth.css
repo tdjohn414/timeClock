@@ -108,3 +108,31 @@
 .auth-switch button:hover {
   text-decoration: underline;
 }
+
+@media (max-width: 480px) {
+  .auth-card {
+    padding: 24px 20px;
+    border-radius: 8px;
+    box-shadow: none;
+    border: 1px solid #eee;
+  }
+
+  .auth-card h1 {
+    font-size: 1.6rem;
+  }
+
+  .auth-card h2 {
+    font-size: 1.1rem;
+    margin-bottom: 20px;
+  }
+
+  .auth-field input {
+    padding: 14px;
+    font-size: 16px;
+  }
+
+  .auth-button {
+    padding: 16px;
+    font-size: 1rem;
+  }
+}
