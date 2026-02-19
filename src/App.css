@@ -825,6 +825,23 @@ html, body {
   box-shadow: 0 4px 12px rgba(243, 156, 18, 0.35);
 }
 
+.btn-lunch {
+  background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+  color: white;
+  border: none;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-lunch:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(56, 161, 105, 0.35);
+}
+
 .btn-pause {
   background: linear-gradient(135deg, #94a3b8 0%, #64748b 100%);
   color: white;

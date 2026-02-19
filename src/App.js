@@ -2159,6 +2159,124 @@ function TimeClock() {
     })();
   };
 
+  // Handle lunch — same as break but 30 minutes
+  const handleLunch = () => {
+    if (!currentBlock) return;
+
+    setToast(null);
+
+    let lunchStartTime;
+    if (completedBlocks.length > 0) {
+      lunchStartTime = completedBlocks[completedBlocks.length - 1].endTime;
+    } else {
+      lunchStartTime = currentBlock.startTime;
+    }
+
+    if (!lunchStartTime) return;
+
+    const lunchEndTime = addMinutesToTime(lunchStartTime, 30);
+
+    const savedTasks = [...currentTasks];
+    const savedBlockContent = { ...currentBlock };
+
+    let blockDuration = 0;
+    if (savedBlockContent.startTime && savedBlockContent.endTime) {
+      const startMins = timeToMinutes(savedBlockContent.startTime);
+      const endMins = timeToMinutes(savedBlockContent.endTime);
+      blockDuration = endMins - startMins;
+    }
+
+    const lunchBlock = {
+      id: Date.now(),
+      startTime: lunchStartTime,
+      endTime: lunchEndTime,
+      tasks: '30 min Lunch',
+      isBreak: true
+    };
+
+    setCurrentBlock(lunchBlock);
+    setCurrentTasks(['30 min Lunch']);
+
+    requestAnimationFrame(() => {
+      setSwipingBlockId(lunchBlock.id);
+
+      setTimeout(() => {
+        setNewlyAddedBlockId(lunchBlock.id);
+        setTimeout(() => setNewlyAddedBlockId(null), 300);
+
+        setCompletedBlocks(prev => [...prev, lunchBlock]);
+
+        const newStartTime = lunchEndTime;
+        const newEndTime = blockDuration > 0 ? addMinutesToTime(newStartTime, blockDuration) : '';
+
+        setCurrentBlock({
+          ...savedBlockContent,
+          id: Date.now() + 1,
+          startTime: newStartTime,
+          endTime: newEndTime
+        });
+        setCurrentTasks(savedTasks);
+        setSwipingBlockId(null);
+      }, 150);
+    });
+
+    (async () => {
+      try {
+        setAutoSaveStatus('saving');
+        let shiftId = pendingShiftId;
+
+        let blockDate = currentDate;
+        if (!shiftId) {
+          const now = new Date();
+          blockDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+          if (blockDate !== currentDate) setCurrentDate(blockDate);
+          const shift = await shiftsAPI.clockIn(blockDate, localTimeToUTC(lunchStartTime, blockDate));
+          shiftId = shift.id;
+          setPendingShiftId(shiftId);
+        } else {
+          for (const block of completedBlocks) {
+            if (block.isGapWidgetPlaceholder) continue;
+            const sMins = timeToMinutes(block.startTime);
+            const eMins = timeToMinutes(block.endTime);
+            if (eMins < sMins) {
+              const d = new Date(blockDate + 'T12:00:00');
+              d.setDate(d.getDate() + 1);
+              blockDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+              break;
+            }
+          }
+        }
+
+        let lunchEndDate = blockDate;
+        const lsMins = timeToMinutes(lunchBlock.startTime);
+        const leMins = timeToMinutes(lunchBlock.endTime);
+        if (leMins < lsMins) {
+          const d = new Date(blockDate + 'T12:00:00');
+          d.setDate(d.getDate() + 1);
+          lunchEndDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
+
+        const savedLunch = await shiftsAPI.addBlock(shiftId, {
+          startTime: localTimeToUTC(lunchBlock.startTime, blockDate),
+          endTime: localTimeToUTC(lunchBlock.endTime, lunchEndDate),
+          tasks: lunchBlock.tasks,
+          isBreak: true
+        });
+        setCompletedBlocks(prev => prev.map(b =>
+          b.id === lunchBlock.id ? { ...b, serverId: savedLunch.id } : b
+        ));
+
+        setAutoSaveStatus('saved');
+        setTimeout(() => setAutoSaveStatus('idle'), 2000);
+      } catch (err) {
+        console.error('Failed to save lunch:', err);
+        setCompletedBlocks(prev => prev.filter(b => b.id !== lunchBlock.id));
+        setAutoSaveStatus('error');
+        setTimeout(() => setAutoSaveStatus('idle'), 3000);
+      }
+    })();
+  };
+
   // Pause shift — converts current block to unpaid type
   const handlePauseShift = () => {
     if (!currentBlock || !currentBlock.startTime) return;
@@ -3631,7 +3749,7 @@ function TimeClock() {
                   <div key={index} className={`preview-block ${block.isBreak ? 'break-block' : ''} ${block.isUnpaid ? 'unpaid-block' : ''}`}>
                     <div className="preview-block-header">
                       <span className="preview-block-num">
-                        {block.isUnpaid ? 'Unpaid' : block.isBreak ? 'Break' : `Block ${workBlockNumber}`}
+                        {block.isUnpaid ? 'Unpaid' : block.isBreak ? (block.tasks?.includes('Lunch') ? 'Lunch' : 'Break') : `Block ${workBlockNumber}`}
                       </span>
                       <span className="preview-block-time">
                         {formatTime(block.startTime)} - {formatTime(block.endTime)}
@@ -5593,6 +5711,9 @@ function TimeClock() {
                             <button type="button" className="btn-break" onClick={handleBreak}>
                               + Break
                             </button>
+                            <button type="button" className="btn-lunch" onClick={handleLunch}>
+                              + Lunch
+                            </button>
                             <button type="button" className="btn-pause" onClick={handlePauseShift}>
                               Pause Shift
                             </button>
@@ -5706,7 +5827,7 @@ function TimeClock() {
                       <div key={block.id} className={`completed-block editing-placeholder ${block.isBreak ? 'break-block' : ''} ${block.isUnpaid ? 'unpaid-block' : ''}`}>
                         <div className="completed-block-row">
                           <span className="completed-number placeholder-fade">
-                            {block.isUnpaid ? 'Unpaid' : block.isBreak ? 'Break' : `#${workBlockNumber}`}
+                            {block.isUnpaid ? 'Unpaid' : block.isBreak ? (block.tasks?.includes('Lunch') ? 'Lunch' : 'Break') : `#${workBlockNumber}`}
                           </span>
                           <span className="completed-time placeholder-fade">
                             <span className="block-date">{formatShortDate(blockDates[index])}</span>
@@ -5750,7 +5871,7 @@ function TimeClock() {
                     >
                       <div className="completed-block-row">
                         <span className="completed-number">
-                          {block.isUnpaid ? 'Unpaid' : block.isBreak ? 'Break' : `#${workBlockNumber}`}
+                          {block.isUnpaid ? 'Unpaid' : block.isBreak ? (block.tasks?.includes('Lunch') ? 'Lunch' : 'Break') : `#${workBlockNumber}`}
                         </span>
                         <span className="completed-time">
                           <span className="block-date">{formatShortDate(blockDates[index])}</span>
@@ -5762,7 +5883,7 @@ function TimeClock() {
                             className={`btn-icon btn-edit-icon ${block.isBreak ? 'btn-extend-break' : ''}`}
                             onClick={() => handleEditBlock(block)}
                             disabled={editingBlock !== null || slidingOutBlockId !== null || deletingBlockId !== null}
-                            title={block.isBreak ? 'Extend Break' : 'Edit'}
+                            title={block.isBreak ? (block.tasks?.includes('Lunch') ? 'Extend Lunch' : 'Extend Break') : 'Edit'}
                           >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
