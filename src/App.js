@@ -185,18 +185,16 @@ function TimeClock() {
   const [invoiceBatchDropdown, setInvoiceBatchDropdown] = useState(false);
   const [showInvoiceBatchDeleteConfirm, setShowInvoiceBatchDeleteConfirm] = useState(false);
   const [currentDate, setCurrentDate] = useState(() => {
+    // Always use Arizona date, not browser local date
     const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    const azDate = now.toLocaleDateString('en-CA', { timeZone: 'America/Phoenix' }); // en-CA gives YYYY-MM-DD
+    return azDate;
   });
   const [shifts, setShifts] = useState([]);
   const [myPayWeeks, setMyPayWeeks] = useState([]); // Current user's shifts grouped by pay week
   const [myPayWeeksLoading, setMyPayWeeksLoading] = useState(false);
-  const [myPayWeeksOffset, setMyPayWeeksOffset] = useState(0); // For infinite scroll pagination
+  const [myPayWeeksOffset, setMyPayWeeksOffset] = useState(0); // For pagination
   const [myPayWeeksHasMore, setMyPayWeeksHasMore] = useState(true);
-  const [expandedMyWeeks, setExpandedMyWeeks] = useState(new Set()); // Track which weeks are expanded in history
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null); // { shift, message }
@@ -319,14 +317,14 @@ function TimeClock() {
     loadShifts();
   }, []);
 
-  // Load current user's shifts grouped by pay week (Arizona time) with infinite scroll
+  // Load current user's shifts grouped by pay week (Arizona time) with Load More pagination
   const loadMyPayWeeks = async (reset = false) => {
     if (myPayWeeksLoading) return;
 
     setMyPayWeeksLoading(true);
     try {
       const currentOffset = reset ? 0 : myPayWeeksOffset;
-      const weeksToLoad = currentOffset === 0 ? 3 : 2; // 3 initial, 2 per subsequent load
+      const weeksToLoad = 5;
 
       const data = await shiftsAPI.getByWeek({
         limit: weeksToLoad,
@@ -337,20 +335,12 @@ function TimeClock() {
 
       if (reset) {
         setMyPayWeeks(newWeeks);
-        // Expand ALL weeks by default
-        setExpandedMyWeeks(new Set(newWeeks.map(w => w.weekStart)));
       } else {
         setMyPayWeeks(prev => [...prev, ...newWeeks]);
-        // Also expand newly loaded weeks
-        setExpandedMyWeeks(prev => {
-          const updated = new Set(prev);
-          newWeeks.forEach(w => updated.add(w.weekStart));
-          return updated;
-        });
       }
 
       setMyPayWeeksOffset(currentOffset + newWeeks.length);
-      setMyPayWeeksHasMore(newWeeks.length === weeksToLoad); // If we got fewer than requested, no more
+      setMyPayWeeksHasMore(newWeeks.length === weeksToLoad);
     } catch (err) {
       console.error('Failed to load pay weeks:', err);
     } finally {
@@ -392,13 +382,15 @@ function TimeClock() {
   useEffect(() => {
     if (pendingShiftId) return;
 
+    // Calculate ms until midnight Arizona time
     const now = new Date();
-    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1);
-    const msUntilMidnight = midnight - now;
+    const azNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Phoenix' }));
+    const azMidnight = new Date(azNow.getFullYear(), azNow.getMonth(), azNow.getDate() + 1, 0, 0, 1);
+    const msUntilMidnight = azMidnight - azNow;
 
     const timeoutId = setTimeout(() => {
       const next = new Date();
-      const todayStr = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`;
+      const todayStr = next.toLocaleDateString('en-CA', { timeZone: 'America/Phoenix' });
       setCurrentDate(todayStr);
     }, msUntilMidnight);
 
@@ -1554,6 +1546,59 @@ function TimeClock() {
     }
   };
 
+  const isoToHHMM = (t) => {
+    if (!t) return '';
+    if (typeof t === 'string' && t.includes('T')) {
+      const d = new Date(t);
+      return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+    }
+    return t.substring(0, 5);
+  };
+
+  const prepareEditingShift = (shift) => {
+    const s = { ...shift };
+    s.timeBlocks = (s.timeBlocks || []).map(b => ({
+      id: b.id || Date.now() + Math.random(),
+      startTime: isoToHHMM(b.start_time || b.startTime),
+      endTime: isoToHHMM(b.end_time || b.endTime),
+      tasks: b.tasks || '',
+      isBreak: b.is_break ?? b.isBreak ?? false,
+      isUnpaid: b.is_unpaid ?? b.isUnpaid ?? false
+    }));
+    setEditingShift(s);
+  };
+
+  const addEditShiftBlock = () => {
+    if (!editingShift) return;
+    const lastBlock = editingShift.timeBlocks[editingShift.timeBlocks.length - 1];
+    const newStartTime = lastBlock?.endTime || '08:00';
+    setEditingShift({
+      ...editingShift,
+      timeBlocks: [
+        ...editingShift.timeBlocks,
+        { id: Date.now(), startTime: newStartTime, endTime: '', tasks: '', isBreak: false, isUnpaid: false }
+      ]
+    });
+  };
+
+  const updateEditShiftBlock = (blockId, field, value) => {
+    if (!editingShift) return;
+    setEditingShift({
+      ...editingShift,
+      timeBlocks: editingShift.timeBlocks.map(b =>
+        b.id === blockId ? { ...b, [field]: value } : b
+      )
+    });
+  };
+
+  const removeEditShiftBlock = (blockId) => {
+    if (!editingShift || editingShift.timeBlocks.length <= 1) return;
+    setEditingShift({
+      ...editingShift,
+      timeBlocks: editingShift.timeBlocks.filter(b => b.id !== blockId)
+    });
+  };
+
   const addNewShiftBlock = () => {
     const lastBlock = newShiftData.timeBlocks[newShiftData.timeBlocks.length - 1];
     const newStartTime = lastBlock?.endTime || '08:00';
@@ -1597,9 +1642,12 @@ function TimeClock() {
 
   const handleUpdateShift = async (shiftId, updates) => {
     try {
-      await adminAPI.updateShift(shiftId, updates);
+      const updatedShift = await adminAPI.updateShift(shiftId, updates);
       setAdminToast({ type: 'success', message: 'Shift updated successfully' });
       setEditingShift(null);
+      if (viewingShift?.id === shiftId && updatedShift) {
+        setViewingShift(updatedShift);
+      }
       loadAdminShifts(adminShiftsPagination.page);
     } catch (err) {
       setAdminToast({ type: 'error', message: err.message || 'Failed to update shift' });
@@ -3362,17 +3410,26 @@ function TimeClock() {
 
     let hour, minute;
 
-    // Handle Date objects
+    // Handle Date objects - display in Arizona time
     if (time instanceof Date) {
-      hour = time.getHours();
-      minute = time.getMinutes();
+      const azParts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Phoenix',
+        hour: 'numeric', minute: 'numeric', hour12: false
+      }).formatToParts(time);
+      hour = parseInt(azParts.find(p => p.type === 'hour').value);
+      minute = parseInt(azParts.find(p => p.type === 'minute').value);
     }
     // Handle ISO timestamp strings (e.g., "2026-01-27T15:45:00.000Z")
+    // Always display in Arizona time (UTC-7, no DST)
     else if (typeof time === 'string' && (time.includes('T') || (time.includes(' ') && time.includes('-')))) {
       const date = new Date(time);
       if (!isNaN(date.getTime())) {
-        hour = date.getHours();
-        minute = date.getMinutes();
+        const azParts = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'America/Phoenix',
+          hour: 'numeric', minute: 'numeric', hour12: false
+        }).formatToParts(date);
+        hour = parseInt(azParts.find(p => p.type === 'hour').value);
+        minute = parseInt(azParts.find(p => p.type === 'minute').value);
       }
     }
     // Handle object with hours/minutes (some DB drivers return this)
@@ -3410,9 +3467,9 @@ function TimeClock() {
       if (dateStr instanceof Date) {
         date = dateStr;
       } else if (typeof dateStr === 'string') {
-        // If it's just YYYY-MM-DD, add time to avoid timezone issues
+        // If it's just YYYY-MM-DD, treat as UTC noon to avoid date shift
         if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-          date = new Date(dateStr + 'T12:00:00');
+          date = new Date(dateStr + 'T12:00:00Z');
         } else {
           date = new Date(dateStr);
         }
@@ -3420,19 +3477,41 @@ function TimeClock() {
         return 'Invalid Date';
       }
       if (isNaN(date.getTime())) return 'Invalid Date';
-      return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/Phoenix' });
     } catch {
       return 'Invalid Date';
     }
+  };
+
+  // Get the Arizona date from a UTC timestamp (e.g., clock_in_time)
+  // Returns formatted date string like "Fri, Feb 13"
+  const getArizonaDateFromTimestamp = (timestamp, options = { weekday: 'short', month: 'short', day: 'numeric' }) => {
+    if (!timestamp) return null;
+    try {
+      const date = new Date(timestamp);
+      if (isNaN(date.getTime())) return null;
+      return date.toLocaleDateString('en-US', { ...options, timeZone: 'America/Phoenix' });
+    } catch {
+      return null;
+    }
+  };
+
+  // Get the shift display date: prefer deriving from clock_in_time (accurate UTC),
+  // fall back to stored date field (may be wrong timezone)
+  const getShiftDisplayDate = (shift, options) => {
+    const clockIn = shift.clockInTime || shift.clock_in_time;
+    if (clockIn) return getArizonaDateFromTimestamp(clockIn, options);
+    return formatDate(shift.date);
   };
 
   // Short date format for block display (e.g., "1/27")
   const formatShortDate = (dateStr) => {
     if (!dateStr) return '';
     try {
-      const date = new Date(dateStr + 'T12:00:00');
+      const date = new Date(dateStr + 'T12:00:00Z');
       if (isNaN(date.getTime())) return '';
-      return `${date.getMonth() + 1}/${date.getDate()}`;
+      const parts = date.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', timeZone: 'America/Phoenix' }).split('/');
+      return `${parts[0]}/${parts[1]}`;
     } catch {
       return '';
     }
@@ -4228,6 +4307,7 @@ function TimeClock() {
           <div className="preview-modal recovery-modal">
             <div className="modal-header">
               <h2>Resume Previous Shift?</h2>
+              <button className="modal-close" onClick={() => setShowRecoveryModal(false)}>&times;</button>
             </div>
             <div className="modal-body">
               {showDiscardConfirm ? (
@@ -5732,156 +5812,121 @@ function TimeClock() {
                 <span className="info-tooltip">Pay weeks are grouped by Arizona time (UTC-7) for consistency across all employees</span>
               </span>
             </h2>
-            {myPayWeeksLoading ? (
+            {myPayWeeksLoading && myPayWeeks.length === 0 ? (
               <p className="loading-text">Loading shifts...</p>
-            ) : myPayWeeks.length === 0 ? (
+            ) : myPayWeeks.length === 0 && !myPayWeeksLoading ? (
               <p className="empty-text">No shifts recorded yet</p>
             ) : (
               <div className="history-weeks-list">
-                {myPayWeeks.map((week) => {
-                  const isWeekExpanded = expandedMyWeeks.has(week.weekStart);
-                  return (
+                {myPayWeeks.map((week) => (
                     <div key={week.weekStart} className="history-week-group">
-                      <div
-                        className="week-header"
-                        onClick={() => {
-                          const newExpanded = new Set(expandedMyWeeks);
-                          if (isWeekExpanded) {
-                            newExpanded.delete(week.weekStart);
-                          } else {
-                            newExpanded.add(week.weekStart);
-                          }
-                          setExpandedMyWeeks(newExpanded);
-                        }}
-                      >
-                        <span className="expand-icon">{isWeekExpanded ? '▼' : '▶'}</span>
+                      <div className="week-header">
                         <span className="week-display"><strong>Week {getWeekNumber(week.weekStart)}:</strong> <span style={{fontWeight: 'normal'}}>{week.weekDisplay}</span></span>
                         <span className="week-hours">{week.totalHours} hrs</span>
                         <span className="week-shift-count">{week.shifts.length} shift{week.shifts.length !== 1 ? 's' : ''}</span>
                       </div>
-                      {isWeekExpanded && (
-                        <div className="week-shifts">
-                          {week.shifts.map((shift) => {
-                            const shiftId = shift._id || shift.id;
-                            const isShiftExpanded = expandedShifts.has(shiftId);
-                            const isInProgress = shift.status === 'in_progress' || shift.status === 'pending';
-                            const statusDisplay = {
-                              'in_progress': { label: 'In Progress', class: 'in-progress' },
-                              'pending': { label: 'In Progress', class: 'in-progress' },
-                              'pending_approval': { label: 'Pending', class: 'pending-approval' },
-                              'rejected': { label: 'Rejected', class: 'rejected' },
-                              'approved': { label: 'Approved', class: 'approved' },
-                              'paid': { label: 'Paid', class: 'paid' },
-                              'completed': { label: 'Completed', class: 'approved' }
-                            }[shift.status] || { label: shift.status, class: shift.status };
-                            return (
-                              <div key={shiftId} className={`history-item ${isShiftExpanded ? 'expanded' : ''} ${isInProgress ? 'pending-shift' : ''}`}>
-                                <div className="history-header">
-                                  <div
-                                    className="history-header-left"
-                                    onClick={() => toggleShiftExpanded(shiftId)}
-                                  >
-                                    <span className="expand-icon">{isShiftExpanded ? '▼' : '▶'}</span>
-                                    <span className={`status-badge ${statusDisplay.class}`}>{statusDisplay.label}</span>
-                                    <span className="history-date">{formatDate(shift.date)}</span>
-                                    <span className="history-times-inline">
-                                      {formatTime(shift.clockInTime)} - {isInProgress ? 'Active' : formatTime(shift.clockOutTime)}
-                                    </span>
-                                  </div>
-                                  <div className="history-header-right">
-                                    {(shift.status === 'pending_approval' || shift.status === 'rejected') && (
-                                      <button
-                                        type="button"
-                                        className="btn-edit-shift"
-                                        title="Edit and resubmit"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleEditShiftInline({
-                                            id: shiftId,
-                                            date: shift.date,
-                                            timeBlocks: shift.timeBlocks || [],
-                                            status: shift.status
-                                          });
-                                        }}
-                                      >
-                                        ✏️
-                                      </button>
-                                    )}
-                                    {shift.status !== 'approved' && shift.status !== 'paid' && (
-                                      <button
-                                        type="button"
-                                        className="btn-delete-shift"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          if (window.confirm('Delete this shift?')) {
-                                            shiftsAPI.delete(shiftId).then(() => {
-                                              // Refresh pay weeks after deletion (reset to reload all)
-                                              setMyPayWeeksOffset(0);
-                                              loadMyPayWeeks(true);
-                                            }).catch(err => alert('Failed to delete: ' + err.message));
-                                          }
-                                        }}
-                                      >
-                                        ×
-                                      </button>
-                                    )}
-                                    <span className="history-hours">{isInProgress ? '--' : shift.totalHours} hrs</span>
-                                  </div>
+                      <div className="week-shifts">
+                        {week.shifts.map((shift) => {
+                          const shiftId = shift._id || shift.id;
+                          const isShiftExpanded = expandedShifts.has(shiftId);
+                          const isInProgress = shift.status === 'in_progress' || shift.status === 'pending';
+                          const statusDisplay = {
+                            'in_progress': { label: 'In Progress', class: 'in-progress' },
+                            'pending': { label: 'In Progress', class: 'in-progress' },
+                            'pending_approval': { label: 'Pending', class: 'pending-approval' },
+                            'rejected': { label: 'Rejected', class: 'rejected' },
+                            'approved': { label: 'Approved', class: 'approved' },
+                            'paid': { label: 'Paid', class: 'paid' },
+                            'completed': { label: 'Completed', class: 'approved' }
+                          }[shift.status] || { label: shift.status, class: shift.status };
+                          return (
+                            <div key={shiftId} className={`history-item ${isShiftExpanded ? 'expanded' : ''} ${isInProgress ? 'pending-shift' : ''}`}>
+                              <div className="history-header">
+                                <div
+                                  className="history-header-left"
+                                  onClick={() => toggleShiftExpanded(shiftId)}
+                                >
+                                  <span className="expand-icon">{isShiftExpanded ? '▼' : '▶'}</span>
+                                  <span className={`status-badge ${statusDisplay.class}`}>{statusDisplay.label}</span>
+                                  <span className="history-date">{getShiftDisplayDate(shift) || formatDate(shift.date)}</span>
+                                  <span className="history-times-inline">
+                                    {formatTime(shift.clockInTime)} - {isInProgress ? 'Active' : formatTime(shift.clockOutTime)}
+                                  </span>
                                 </div>
-                                {isShiftExpanded && shift.timeBlocks && shift.timeBlocks.length > 0 && (
-                                  <div className="history-tasks">
-                                    {shift.timeBlocks.map((block, i) => (
-                                      <div key={i} className={`history-task ${block.isBreak ? 'break-task' : ''} ${block.isUnpaid ? 'unpaid-task' : ''}`}>
-                                        <span className="task-time">
-                                          {formatTime(block.startTime)} - {formatTime(block.endTime)}
-                                        </span>
-                                        <span className="task-text">
-                                          {block.tasks.split(' • ').map((task, j) => (
-                                            <span key={j} className="task-line-inline">{task}</span>
-                                          ))}
-                                        </span>
-                                        {calculateBlockHours(block.startTime, block.endTime) && (
-                                          <span className="task-hours">{calculateBlockHours(block.startTime, block.endTime)}h</span>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
+                                <div className="history-header-right">
+                                  {(shift.status === 'pending_approval' || shift.status === 'rejected') && (
+                                    <button
+                                      type="button"
+                                      className="btn-edit-shift"
+                                      title="Edit and resubmit"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleEditShiftInline({
+                                          id: shiftId,
+                                          date: shift.date,
+                                          timeBlocks: shift.timeBlocks || [],
+                                          status: shift.status
+                                        });
+                                      }}
+                                    >
+                                      ✏️
+                                    </button>
+                                  )}
+                                  {shift.status !== 'approved' && shift.status !== 'paid' && (
+                                    <button
+                                      type="button"
+                                      className="btn-delete-shift"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (window.confirm('Delete this shift?')) {
+                                          shiftsAPI.delete(shiftId).then(() => {
+                                            setMyPayWeeksOffset(0);
+                                            loadMyPayWeeks(true);
+                                          }).catch(err => alert('Failed to delete: ' + err.message));
+                                        }
+                                      }}
+                                    >
+                                      ×
+                                    </button>
+                                  )}
+                                  <span className="history-hours">{isInProgress ? '--' : shift.totalHours} hrs</span>
+                                </div>
                               </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                              {isShiftExpanded && shift.timeBlocks && shift.timeBlocks.length > 0 && (
+                                <div className="history-tasks">
+                                  {shift.timeBlocks.map((block, i) => (
+                                    <div key={i} className={`history-task ${block.isBreak ? 'break-task' : ''} ${block.isUnpaid ? 'unpaid-task' : ''}`}>
+                                      <span className="task-time">
+                                        {formatTime(block.startTime)} - {formatTime(block.endTime)}
+                                      </span>
+                                      <span className="task-text">
+                                        {block.tasks.split(' • ').map((task, j) => (
+                                          <span key={j} className="task-line-inline">{task}</span>
+                                        ))}
+                                      </span>
+                                      {calculateBlockHours(block.startTime, block.endTime) && (
+                                        <span className="task-hours">{calculateBlockHours(block.startTime, block.endTime)}h</span>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  );
-                })}
-                {/* Infinite Scroll Sentinel */}
-                {myPayWeeksHasMore ? (
-                  <div
-                    className="infinite-scroll-sentinel"
-                    ref={el => {
-                      if (el && !myPayWeeksLoading) {
-                        const observer = new IntersectionObserver(
-                          (entries) => {
-                            if (entries[0].isIntersecting && myPayWeeksHasMore && !myPayWeeksLoading) {
-                              loadMyPayWeeks(false);
-                            }
-                          },
-                          { threshold: 0.1 }
-                        );
-                        observer.observe(el);
-                        return () => observer.disconnect();
-                      }
-                    }}
-                    style={{ padding: '20px', textAlign: 'center' }}
-                  >
-                    {myPayWeeksLoading && (
-                      <span style={{ color: '#64748b', fontSize: '0.9rem' }}>Loading more weeks...</span>
-                    )}
-                  </div>
-                ) : myPayWeeks.length > 0 && (
-                  <div style={{ padding: '20px', textAlign: 'center', color: '#64748b', fontSize: '0.9rem' }}>
-                    No more shifts to load
+                ))}
+                {myPayWeeksHasMore && (
+                  <div style={{ padding: '20px', textAlign: 'center' }}>
+                    <button
+                      type="button"
+                      className="btn-load-more"
+                      onClick={() => loadMyPayWeeks(false)}
+                      disabled={myPayWeeksLoading}
+                    >
+                      {myPayWeeksLoading ? 'Loading...' : 'Load More'}
+                    </button>
                   </div>
                 )}
               </div>
@@ -6309,7 +6354,7 @@ function TimeClock() {
           {/* Edit Shift Modal */}
           {editingShift && (
             <div className="modal-overlay" onClick={() => setEditingShift(null)}>
-              <div className="preview-modal edit-modal" onClick={e => e.stopPropagation()}>
+              <div className="preview-modal create-shift-modal" onClick={e => e.stopPropagation()}>
                 <div className="modal-header">
                   <h2>Edit Shift</h2>
                   <button className="modal-close" onClick={() => setEditingShift(null)}>&times;</button>
@@ -6319,25 +6364,131 @@ function TimeClock() {
                     <label>Date</label>
                     <input type="date" value={editingShift.date?.split('T')[0] || editingShift.date} onChange={e => setEditingShift({...editingShift, date: e.target.value})} />
                   </div>
-                  <div className="form-field">
-                    <label>Clock In</label>
-                    <input type="time" value={editingShift.clock_in_time?.substring(0,5) || ''} onChange={e => setEditingShift({...editingShift, clockInTime: e.target.value})} />
-                  </div>
-                  <div className="form-field">
-                    <label>Clock Out</label>
-                    <input type="time" value={editingShift.clock_out_time?.substring(0,5) || ''} onChange={e => setEditingShift({...editingShift, clockOutTime: e.target.value})} />
+                  <div className="form-two-column">
+                    <div className="form-field">
+                      <label>Clock In</label>
+                      <input type="time" value={editingShift.clockInTime || isoToHHMM(editingShift.clock_in_time) || ''} onChange={e => setEditingShift({...editingShift, clockInTime: e.target.value})} />
+                    </div>
+                    <div className="form-field">
+                      <label>Clock Out</label>
+                      <input type="time" value={editingShift.clockOutTime || isoToHHMM(editingShift.clock_out_time) || ''} onChange={e => setEditingShift({...editingShift, clockOutTime: e.target.value})} />
+                    </div>
                   </div>
                   <div className="form-field">
                     <label>Total Hours</label>
-                    <input type="number" step="0.01" value={editingShift.total_hours || ''} onChange={e => setEditingShift({...editingShift, totalHours: e.target.value})} />
+                    <input type="number" step="0.01" value={editingShift.totalHours ?? editingShift.total_hours ?? ''} onChange={e => setEditingShift({...editingShift, totalHours: e.target.value})} />
+                  </div>
+
+                  <div style={{ marginTop: '20px', borderTop: '1px solid #eee', paddingTop: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                      <h4 style={{ margin: 0, color: '#2c3e50' }}>Time Blocks ({editingShift.timeBlocks?.length || 0})</h4>
+                      <button
+                        type="button"
+                        onClick={addEditShiftBlock}
+                        style={{ background: '#9b59b6', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem' }}
+                      >
+                        + Add Block
+                      </button>
+                    </div>
+
+                    {editingShift.timeBlocks && editingShift.timeBlocks.length > 0 ? (
+                      editingShift.timeBlocks.map((block, idx) => (
+                        <div
+                          key={block.id}
+                          style={{
+                            background: block.isUnpaid ? '#f1f5f9' : block.isBreak ? '#fef9e7' : '#f8f9fa',
+                            borderRadius: '8px',
+                            padding: '12px',
+                            marginBottom: '8px',
+                            borderLeft: `3px solid ${block.isUnpaid ? '#94a3b8' : block.isBreak ? '#f39c12' : '#9b59b6'}`
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                            <span style={{ fontWeight: '600', fontSize: '0.9rem' }}>Block {idx + 1}</span>
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.85rem', color: '#666' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={block.isBreak}
+                                  onChange={e => {
+                                    updateEditShiftBlock(block.id, 'isBreak', e.target.checked);
+                                    if (e.target.checked) updateEditShiftBlock(block.id, 'isUnpaid', false);
+                                  }}
+                                />
+                                Break
+                              </label>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.85rem', color: '#666' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={block.isUnpaid || false}
+                                  onChange={e => {
+                                    updateEditShiftBlock(block.id, 'isUnpaid', e.target.checked);
+                                    if (e.target.checked) updateEditShiftBlock(block.id, 'isBreak', false);
+                                  }}
+                                />
+                                Unpaid
+                              </label>
+                              {editingShift.timeBlocks.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeEditShiftBlock(block.id)}
+                                  style={{ background: '#e74c3c', color: 'white', border: 'none', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="form-two-column" style={{ marginBottom: '8px' }}>
+                            <input
+                              type="time"
+                              value={block.startTime}
+                              onChange={e => updateEditShiftBlock(block.id, 'startTime', e.target.value)}
+                              placeholder="Start Time"
+                              style={{ padding: '8px', borderRadius: '6px', border: '1px solid #ddd' }}
+                            />
+                            <input
+                              type="time"
+                              value={block.endTime}
+                              onChange={e => updateEditShiftBlock(block.id, 'endTime', e.target.value)}
+                              placeholder="End Time"
+                              style={{ padding: '8px', borderRadius: '6px', border: '1px solid #ddd' }}
+                            />
+                          </div>
+                          {!block.isBreak && (
+                            <textarea
+                              value={block.tasks}
+                              onChange={e => updateEditShiftBlock(block.id, 'tasks', e.target.value)}
+                              placeholder="Tasks performed during this time block..."
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #ddd', resize: 'vertical', minHeight: '60px', fontSize: '0.9rem' }}
+                            />
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      <p style={{ textAlign: 'center', color: '#9ca3af', fontSize: '0.9rem', padding: '16px' }}>No time blocks. Click "+ Add Block" to add one.</p>
+                    )}
                   </div>
                 </div>
                 <div className="modal-footer">
                   <button className="btn-cancel-modal" onClick={() => setEditingShift(null)}>Cancel</button>
                   <button className="btn-confirm-modal" onClick={() => {
-                    // Only send editable fields - do NOT send timeBlocks or they get destroyed
-                    const { timeBlocks, time_blocks, ...shiftUpdates } = editingShift;
-                    handleUpdateShift(editingShift.id, shiftUpdates);
+                    const shiftDate = editingShift.date?.split('T')[0] || editingShift.date;
+                    const clockIn = editingShift.clockInTime || isoToHHMM(editingShift.clock_in_time);
+                    const clockOut = editingShift.clockOutTime || isoToHHMM(editingShift.clock_out_time);
+                    handleUpdateShift(editingShift.id, {
+                      date: shiftDate,
+                      clockInTime: localTimeToUTC(clockIn, shiftDate),
+                      clockOutTime: clockOut ? localTimeToUTC(clockOut, shiftDate) : undefined,
+                      totalHours: editingShift.totalHours ?? editingShift.total_hours,
+                      timeBlocks: editingShift.timeBlocks.map(b => ({
+                        startTime: b.startTime,
+                        endTime: b.endTime,
+                        tasks: b.tasks,
+                        isBreak: b.isBreak,
+                        isUnpaid: b.isUnpaid
+                      }))
+                    });
                   }}>Save Changes</button>
                 </div>
               </div>
@@ -6431,7 +6582,7 @@ function TimeClock() {
                 <div className="shift-detail-card-header">
                   <h2>Shift Details</h2>
                   <div className="shift-detail-actions">
-                    <button className="btn-icon" title="Edit" onClick={() => { setEditingShift({...viewingShift}); }}>✏️</button>
+                    <button className="btn-icon" title="Edit" onClick={() => prepareEditingShift(viewingShift)}>✏️</button>
                     <button className="btn-icon danger" title="Delete" onClick={() => setDeleteConfirm({ type: 'shift', id: viewingShift.id })}>🗑️</button>
                   </div>
                 </div>
@@ -6447,7 +6598,7 @@ function TimeClock() {
                   </div>
                   <div className="detail-row">
                     <span className="detail-label">Date</span>
-                    <span className="detail-value">{formatDate(viewingShift.date)}</span>
+                    <span className="detail-value">{getShiftDisplayDate(viewingShift) || formatDate(viewingShift.date)}</span>
                   </div>
                   <div className="detail-row">
                     <span className="detail-label">Clock In</span>
@@ -6696,7 +6847,7 @@ function TimeClock() {
                                       onClick={() => viewShiftDetails(shift.id)}
                                       style={{ cursor: 'pointer' }}
                                     >
-                                      <span className="shift-date">{new Date(shift.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                                      <span className="shift-date">{getShiftDisplayDate(shift) || formatDate(shift.date)}</span>
                                       <span className="shift-times">{formatTime(shift.clockInTime)} - {formatTime(shift.clockOutTime)}</span>
                                       <span className="shift-hours">{shift.totalHours} hrs</span>
                                       {['approved', 'pending_approval', 'paid'].includes(shift.status) ? (
@@ -7289,7 +7440,7 @@ function TimeClock() {
                                     key={shift.id}
                                     className="payroll-shift-row"
                                   >
-                                    <span className="shift-date">{new Date(shift.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                                    <span className="shift-date">{getShiftDisplayDate(shift) || formatDate(shift.date)}</span>
                                     <span className="shift-times">{formatTime(shift.clockInTime)} - {formatTime(shift.clockOutTime)}</span>
                                     <span className="shift-hours">{shift.totalHours} hrs</span>
                                     <div className="status-dropdown-container" onClick={e => e.stopPropagation()}>
@@ -7504,7 +7655,7 @@ function TimeClock() {
                                   <td className="employee-name-cell" onClick={e => { e.stopPropagation(); loadUserPayWeeks(s.user_id || s.userId); }}>
                                     <span className="employee-name-link">{s.userName || s.user_name}</span>
                                   </td>
-                                  <td>{formatDate(s.date)}</td>
+                                  <td>{getShiftDisplayDate(s) || formatDate(s.date)}</td>
                                   <td>{formatTime(s.clock_in_time)}</td>
                                   <td>{formatTime(s.clock_out_time)}</td>
                                   <td>{s.total_hours}</td>
@@ -7559,7 +7710,7 @@ function TimeClock() {
                                     )}
                                   </td>
                                   <td className="action-cell" onClick={e => e.stopPropagation()}>
-                                    <button className="btn-icon" title="Edit" onClick={() => setEditingShift({...s})}>
+                                    <button className="btn-icon" title="Edit" onClick={() => prepareEditingShift(s)}>
                                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
@@ -7635,7 +7786,7 @@ function TimeClock() {
                             />
                           </label>
                           <span className="pending-shift-name">{shift.user_name}</span>
-                          <span className="pending-shift-date">{new Date(shift.date + 'T00:00:00').toLocaleDateString()}</span>
+                          <span className="pending-shift-date">{getShiftDisplayDate(shift, { month: 'numeric', day: 'numeric', year: 'numeric' }) || formatDate(shift.date)}</span>
                         </div>
                         <div className="pending-shift-times">
                           <span>{formatTime(shift.clockInTime || shift.clock_in_time)} - {formatTime(shift.clockOutTime || shift.clock_out_time)}</span>
@@ -7687,7 +7838,7 @@ function TimeClock() {
             <div className="modal-overlay" onClick={() => setRejectModalShift(null)}>
               <div className="modal" onClick={e => e.stopPropagation()}>
                 <h3>Reject Shift</h3>
-                <p>Rejecting shift for <strong>{rejectModalShift.user_name}</strong> on {new Date(rejectModalShift.date + 'T00:00:00').toLocaleDateString()}</p>
+                <p>Rejecting shift for <strong>{rejectModalShift.user_name}</strong> on {getShiftDisplayDate(rejectModalShift) || formatDate(rejectModalShift.date)}</p>
                 <label>
                   Reason (will be sent to employee):
                   <textarea
@@ -8620,7 +8771,7 @@ function TimeClock() {
                           <span className="approved-item-hours">{shift.totalHours || shift.total_hours}h</span>
                         </div>
                         <div className="approved-item-details">
-                          <span className="approved-item-date">{new Date(shift.date + 'T00:00:00').toLocaleDateString()}</span>
+                          <span className="approved-item-date">{getShiftDisplayDate(shift, { month: 'numeric', day: 'numeric', year: 'numeric' }) || formatDate(shift.date)}</span>
                           <div className="approved-item-times">
                             <span>{formatTime(shift.clockInTime || shift.clock_in_time)}</span>
                             <span>{formatTime(shift.clockOutTime || shift.clock_out_time)}</span>

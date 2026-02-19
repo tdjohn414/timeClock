@@ -1593,14 +1593,8 @@ html, body {
   padding: 14px 16px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
   color: white !important;
-  cursor: pointer;
-  user-select: none;
   font-weight: 500;
   border-bottom: none !important;
-}
-
-.history-week-group .week-header:hover {
-  opacity: 0.95;
 }
 
 .history-week-group .week-header .expand-icon {
@@ -3611,7 +3605,6 @@ html, body {
   background: white;
   border-radius: 12px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-  overflow: hidden;
 }
 
 .week-header {
@@ -3621,6 +3614,7 @@ html, body {
   padding: 14px 20px;
   background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
   border-bottom: 1px solid #e2e8f0;
+  border-radius: 12px 12px 0 0;
 }
 
 .week-header.centered {
@@ -3862,7 +3856,7 @@ html, body {
 }
 
 .week-shifts-table {
-  overflow-x: auto;
+  overflow: visible;
 }
 
 .week-shifts-table .admin-table {
@@ -6700,7 +6694,6 @@ html, body {
   background: white;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  overflow: hidden;
 }
 
 .pay-week-header {
@@ -6891,7 +6884,6 @@ html, body {
   background: white;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  overflow: hidden;
   transition: border-color 0.2s;
 }
 
@@ -7369,21 +7361,9 @@ html, body {
   padding: 14px 16px;
   background: linear-gradient(135deg, #475569 0%, #334155 100%) !important;
   color: white !important;
-  cursor: pointer;
-  user-select: none;
   font-weight: 500;
   border-bottom: none !important;
   justify-content: flex-start;
-}
-
-.history-tab .history-week-group .week-header:hover {
-  opacity: 0.92;
-}
-
-.history-tab .history-week-group .week-header .expand-icon {
-  font-size: 0.8rem;
-  color: white !important;
-  min-width: 16px;
 }
 
 .history-tab .history-week-group .week-header .week-display {
@@ -7406,6 +7386,28 @@ html, body {
   border-radius: 12px;
   color: white !important;
   border: none !important;
+}
+
+/* Load More Button */
+.btn-load-more {
+  padding: 10px 32px;
+  background: linear-gradient(135deg, #475569 0%, #334155 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-load-more:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.btn-load-more:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* Info Tooltip for AZ Time */
