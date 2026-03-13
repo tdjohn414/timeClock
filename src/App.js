@@ -10,9 +10,6 @@ import './App.css';
 // WebSocket URL (same as API but for socket.io)
 const SOCKET_URL = process.env.REACT_APP_API_URL?.replace('/api', '') || 'http://localhost:3001';
 
-// Hardcoded admin email
-const ADMIN_EMAIL = 'tyler@fullscopeestimating.com';
-
 // Preset task names (used for quick task entry)
 const PRESET_TASK_NAMES = [
   'Copying scope',
@@ -125,7 +122,7 @@ function TimeClock() {
   const [activeTab, setActiveTab] = useState('today'); // 'today', 'history', or 'admin'
   const [adminShifts, setAdminShifts] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
-  const isAdmin = user?.email === ADMIN_EMAIL || user?.role === 'admin';
+  const isAdmin = user?.role === 'admin';
 
   // Admin Panel State
   const [adminSubTab, setAdminSubTab] = useState('dashboard');
